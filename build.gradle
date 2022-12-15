@@ -1,0 +1,53 @@
+plugins {
+    id 'java'
+}
+apply plugin: 'maven-publish'
+
+sourceCompatibility = JavaVersion.VERSION_1_7
+targetCompatibility = JavaVersion.VERSION_1_7
+
+task mainJar(type: Jar) {
+    from sourceSets.main.output
+    manifest {
+        attributes(
+                "Premain-Class": "com.intellij.rt.debugger.agent.DebuggerAgent",
+                "Can-Retransform-Classes": "true",
+                "Boot-Class-Path": "debugger-agent.jar",
+        )
+    }
+}
+
+task sourceJar(type: Jar) {
+    from sourceSets.main.java
+}
+
+dependencies {
+    implementation files("lib/asm-capture-9.1.jar")
+}
+
+artifacts {
+    archives mainJar, sourceJar
+}
+
+publishing {
+    publications {
+        MyPublication(MavenPublication) {
+            artifactId 'debugger-agent'
+            groupId 'org.jetbrains.intellij.deps'
+            version '1.0-SNAPSHOT'
+            artifact mainJar
+            artifact sourceJar {
+                classifier "sources"
+            }
+        }
+    }
+    repositories {
+        maven {
+            url "https://packages.jetbrains.team/maven/p/ij/intellij-dependencies"
+            credentials {
+                username = System.getenv('INTELLIJ_DEPENDENCIES_BOT')
+                password = System.getenv('INTELLIJ_DEPENDENCIES_TOKEN')
+            }
+        }
+    }
+}
