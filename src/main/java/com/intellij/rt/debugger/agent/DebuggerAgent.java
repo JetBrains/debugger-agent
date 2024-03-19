@@ -1,7 +1,12 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.rt.debugger.agent;
 
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
+import java.net.URI;
+import java.util.Properties;
 
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
 public class DebuggerAgent {
@@ -13,7 +18,45 @@ public class DebuggerAgent {
     }
     System.setProperty("intellij.debug.agent", "true");
 
-    CaptureAgent.init(args, instrumentation);
+    readAndApplyProperties(args, instrumentation);
+  }
+
+  private static void initAll(Instrumentation instrumentation, Properties properties) {
+    CaptureAgent.init(properties, instrumentation);
     CollectionBreakpointInstrumentor.init(instrumentation);
+  }
+
+  private static void readAndApplyProperties(String uri, Instrumentation instrumentation) {
+    Properties properties = new Properties();
+
+    File file = null;
+    if (uri != null && !uri.isEmpty()) {
+      try {
+        InputStream stream = null;
+        try {
+          file = new File(new URI(uri));
+          stream = new FileInputStream(file);
+          // use ISO 8859-1 character encoding
+          properties.load(stream);
+        } finally {
+          if (stream != null) {
+            stream.close();
+          }
+        }
+      } catch (Exception e) {
+        System.out.println("Capture agent: unable to read settings");
+        e.printStackTrace();
+      }
+    }
+
+    initAll(instrumentation, properties);
+
+    // delete settings file only if it was read correctly
+    if (Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"))) {
+      if (file != null) {
+        //noinspection ResultOfMethodCallIgnored
+        file.delete();
+      }
+    }
   }
 }

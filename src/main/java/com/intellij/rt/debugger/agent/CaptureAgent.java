@@ -18,10 +18,10 @@ public final class CaptureAgent {
 
   private static final Map<String, List<InstrumentPoint>> myInstrumentPoints = new HashMap<String, List<InstrumentPoint>>();
 
-  public static void init(String args, Instrumentation instrumentation) {
+  public static void init(Properties properties, Instrumentation instrumentation) {
     ourInstrumentation = instrumentation;
     try {
-      readSettings(args);
+      applyProperties(properties);
 
       // remember already loaded and not instrumented classes to skip them during retransform
       for (Class aClass : instrumentation.getAllLoadedClasses()) {
@@ -73,45 +73,13 @@ public final class CaptureAgent {
     System.setProperty(modulesKey, property);
   }
 
-  private static void readSettings(String uri) {
-    if (uri == null || uri.isEmpty()) {
-      return;
-    }
-
-    Properties properties = new Properties();
-    File file;
-    try {
-      InputStream stream = null;
-      try {
-        file = new File(new URI(uri));
-        stream = new FileInputStream(file);
-        // use ISO 8859-1 character encoding
-        properties.load(stream);
-      }
-      finally {
-        if (stream != null) {
-          stream.close();
-        }
-      }
-    }
-    catch (Exception e) {
-      System.out.println("Capture agent: unable to read settings");
-      e.printStackTrace();
-      return;
-    }
-
+  private static void applyProperties(Properties properties) {
     if (Boolean.parseBoolean(properties.getProperty("disabled", "false"))) {
       CaptureStorage.setEnabled(false);
     }
 
     for (Map.Entry<Object, Object> entry : properties.entrySet()) {
       addPoint((String)entry.getKey(), (String)entry.getValue());
-    }
-
-    // delete settings file only if it was read correctly
-    if (Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"))) {
-      //noinspection ResultOfMethodCallIgnored
-      file.delete();
     }
   }
 
