@@ -23,6 +23,7 @@ public class DebuggerAgent {
 
   private static void initAll(Instrumentation instrumentation, Properties properties) {
     CaptureAgent.init(properties, instrumentation);
+    SuspendHelper.init(properties);
     CollectionBreakpointInstrumentor.init(instrumentation);
   }
 
