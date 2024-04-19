@@ -3,11 +3,13 @@ package com.intellij.rt.debugger.agent;
 
 import org.jetbrains.capture.org.objectweb.asm.*;
 
-import java.io.*;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.StringReader;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.lang.instrument.UnmodifiableClassException;
-import java.net.URI;
+import java.lang.reflect.Method;
 import java.security.ProtectionDomain;
 import java.util.*;
 
@@ -292,9 +294,26 @@ public final class CaptureAgent {
                              String storageMethodName,
                              String methodDisplayName) {
       keyProvider.loadKey(mv, isStatic, argumentTypes, methodDisplayName, this);
-      mv.visitMethodInsn(Opcodes.INVOKESTATIC, CaptureStorage.class.getName().replaceAll("\\.", "/"), storageMethodName,
-                         "(Ljava/lang/Object;)V", false);
+      invokeStorageMethod(mv, storageMethodName);
     }
+  }
+
+  private static void invokeStorageMethod(MethodVisitor mv, String name) {
+    Method method = null;
+    for (Method m : CaptureStorage.class.getMethods()) {
+      if (name.equals(m.getName())) {
+        method = m;
+        break;
+      }
+    }
+    if (method == null) {
+      throw new IllegalStateException("Unable to find Storage method " + name);
+    }
+    mv.visitMethodInsn(Opcodes.INVOKESTATIC,
+            Type.getInternalName(CaptureStorage.class),
+            name,
+            Type.getMethodDescriptor(method),
+            false);
   }
 
   private static class InstrumentPoint {
@@ -455,6 +474,18 @@ public final class CaptureAgent {
     }
   }
 
+  private static class CoroutineOwnerKeyProvider implements KeyProvider {
+    @Override
+    public void loadKey(MethodVisitor mv,
+                        boolean isStatic,
+                        Type[] argumentTypes,
+                        String methodDisplayName,
+                        CaptureInstrumentor instrumentor) {
+      mv.visitVarInsn(Opcodes.ALOAD, 0);
+      invokeStorageMethod(mv, "coroutineOwner");
+    }
+  }
+
   private static class ParamKeyProvider implements KeyProvider {
     private final int myIdx;
 
@@ -552,5 +583,11 @@ public final class CaptureAgent {
     addCapture("com/sun/glass/ui/InvokeLaterDispatcher", "invokeLater", FIRST_PARAM);
     addInsert("com/sun/glass/ui/InvokeLaterDispatcher$Future", "run",
               new FieldKeyProvider("com/sun/glass/ui/InvokeLaterDispatcher$Future", "runnable"));
+
+    if (Boolean.getBoolean("debugger.agent.enable.coroutines") && !Boolean.getBoolean("kotlinx.coroutines.debug.enable.creation.stack.trace")) {
+      // Kotlin coroutines
+      addCapture("kotlinx/coroutines/debug/internal/DebugProbesImpl$CoroutineOwner", CONSTRUCTOR, THIS_KEY_PROVIDER);
+      addInsert("kotlin/coroutines/jvm/internal/BaseContinuationImpl", "resumeWith", new CoroutineOwnerKeyProvider());
+    }
   }
 }

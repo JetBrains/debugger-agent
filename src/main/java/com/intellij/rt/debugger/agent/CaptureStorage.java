@@ -88,6 +88,30 @@ public final class CaptureStorage {
     }
   }
 
+  @SuppressWarnings("unused")
+  public static Object coroutineOwner(Object key) {
+    if (!ENABLED) {
+      return key;
+    }
+    try {
+      Object res = key;
+      while (true) {
+        //TODO: slow implementation for now, need to put the code directly into the insert point
+        Object caller = res.getClass().getMethod("getCallerFrame").invoke(res);
+        if (caller == null) {
+          return res;
+        }
+        if ("kotlinx.coroutines.debug.internal.DebugProbesImpl$CoroutineOwner".equals(caller.getClass().getName())) {
+          return caller;
+        }
+        res = caller;
+      }
+    } catch (Exception e) {
+      handleException(e);
+    }
+    return key;
+  }
+
   //// END - METHODS CALLED FROM THE USER PROCESS
 
   private static void processQueue() {
