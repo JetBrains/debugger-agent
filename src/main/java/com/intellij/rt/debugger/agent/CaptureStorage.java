@@ -6,6 +6,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -94,10 +95,12 @@ public final class CaptureStorage {
       return key;
     }
     try {
+      Method getCallerFrameMethod = Class.forName("kotlin.coroutines.jvm.internal.CoroutineStackFrame", false, key.getClass().getClassLoader())
+              .getDeclaredMethod("getCallerFrame");
       Object res = key;
       while (true) {
         //TODO: slow implementation for now, need to put the code directly into the insert point
-        Object caller = res.getClass().getMethod("getCallerFrame").invoke(res);
+        Object caller = getCallerFrameMethod.invoke(res);
         if (caller == null) {
           return res;
         }
