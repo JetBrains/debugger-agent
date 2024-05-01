@@ -11,17 +11,16 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-@SuppressWarnings("UseOfSystemOutOrSystemErr")
+@SuppressWarnings({"UseOfSystemOutOrSystemErr", "rawtypes"})
 public final class CaptureStorage {
   public static final String GENERATED_INSERT_METHOD_POSTFIX = "$$$capture";
   private static final ReferenceQueue KEY_REFERENCE_QUEUE = new ReferenceQueue();
-  private static final ConcurrentMap<WeakReference, CapturedStack> STORAGE = new ConcurrentHashMap<WeakReference, CapturedStack>();
+  private static final ConcurrentMap<WeakReference, CapturedStack> STORAGE = new ConcurrentHashMap<>();
 
-  @SuppressWarnings("SSBasedInspection")
   private static final ThreadLocal<Deque<CapturedStack>> CURRENT_STACKS = new ThreadLocal<Deque<CapturedStack>>() {
     @Override
     protected Deque<CapturedStack> initialValue() {
-      return new LinkedList<CapturedStack>();
+      return new LinkedList<>();
     }
   };
 
@@ -292,7 +291,7 @@ public final class CaptureStorage {
   }
 
   private static ArrayList<StackTraceElement> getStackTrace(CapturedStack stack, int limit) {
-    ArrayList<StackTraceElement> res = new ArrayList<StackTraceElement>();
+    ArrayList<StackTraceElement> res = new ArrayList<>();
     while (stack != null && res.size() <= limit) {
       List<StackTraceElement> stackTrace = stack.getStackTrace();
       if (stack instanceof DeepCapturedStack) {

@@ -50,13 +50,13 @@ public class CollectionBreakpointInstrumentor {
   private static final String OBJECT_CLASS_NAME = "java.lang.Object";
 
   private static final ConcurrentIdentityHashMap myInstanceFilters = new ConcurrentIdentityHashMap();
-  private static final ConcurrentHashMap<String, Set<String>> myFieldsToCapture = new ConcurrentHashMap<String, Set<String>>();
+  private static final ConcurrentHashMap<String, Set<String>> myFieldsToCapture = new ConcurrentHashMap<>();
 
-  private static final Map<String, KnownMethodsSet> myKnownMethods = new HashMap<String, KnownMethodsSet>();
+  private static final Map<String, KnownMethodsSet> myKnownMethods = new HashMap<>();
 
-  private static final Set<String> myUnprocessedNestedMembers = new HashSet<String>();
-  private static final Map<String, KnownMethodsSet> myCollectionsToTransform = new HashMap<String, KnownMethodsSet>();
-  private static final Set<String> myClassesToTransform = new HashSet<String>();
+  private static final Set<String> myUnprocessedNestedMembers = new HashSet<>();
+  private static final Map<String, KnownMethodsSet> myCollectionsToTransform = new HashMap<>();
+  private static final Set<String> myClassesToTransform = new HashSet<>();
   private static final ReentrantLock myTransformLock = new ReentrantLock();
 
   @SuppressWarnings("StaticNonFinalField")
@@ -235,7 +235,7 @@ public class CollectionBreakpointInstrumentor {
   private static ArrayList<Modification> getModifications(Multiset oldElements, Object newCollection) {
     Multiset newElements = Multiset.toMultiset(newCollection);
 
-    ArrayList<Modification> modifications = new ArrayList<Modification>();
+    ArrayList<Modification> modifications = new ArrayList<>();
 
     for (Map.Entry<Object, Integer> entry : newElements.entrySet()) {
       Integer newNumber = entry.getValue();
@@ -307,7 +307,7 @@ public class CollectionBreakpointInstrumentor {
   private static void transformClassNestedMembers() {
     while (!myUnprocessedNestedMembers.isEmpty()) {
       myClassesToTransform.addAll(myUnprocessedNestedMembers);
-      Set<String> nestedNames = new HashSet<String>(myUnprocessedNestedMembers);
+      Set<String> nestedNames = new HashSet<>(myUnprocessedNestedMembers);
       myUnprocessedNestedMembers.clear();
       transformNestedMembers(nestedNames);
     }
@@ -317,7 +317,7 @@ public class CollectionBreakpointInstrumentor {
     for (String nestedName : myUnprocessedNestedMembers) {
       myCollectionsToTransform.put(nestedName, new KnownMethodsSet());
     }
-    Set<String> nestedNames = new HashSet<String>(myUnprocessedNestedMembers);
+    Set<String> nestedNames = new HashSet<>(myUnprocessedNestedMembers);
     myUnprocessedNestedMembers.clear();
     transformNestedMembers(nestedNames);
   }
@@ -337,13 +337,13 @@ public class CollectionBreakpointInstrumentor {
   }
 
   private static List<Class<?>> getSuperClassesAndInterfaces(Class<?> cls) {
-    List<Class<?>> result = new ArrayList<Class<?>>();
+    List<Class<?>> result = new ArrayList<>();
 
-    Set<String> alreadyProcessed = new HashSet<String>();
-    Queue<Class<?>> supersQueue = new LinkedList<Class<?>>();
+    Set<String> alreadyProcessed = new HashSet<>();
+    Queue<Class<?>> supersQueue = new LinkedList<>();
     supersQueue.add(cls);
 
-    List<Class<?>> unprocessed = new ArrayList<Class<?>>();
+    List<Class<?>> unprocessed = new ArrayList<>();
     while (!supersQueue.isEmpty()) {
       Class<?> currentCls = supersQueue.poll();
       alreadyProcessed.add(currentCls.getName());
@@ -375,7 +375,7 @@ public class CollectionBreakpointInstrumentor {
   }
 
   private static Set<String> getClassesNames(List<Class<?>> classes) {
-    Set<String> result = new HashSet<String>();
+    Set<String> result = new HashSet<>();
     for (Class<?> cls : classes) {
       result.add(cls.getName());
     }
@@ -828,7 +828,7 @@ public class CollectionBreakpointInstrumentor {
   }
 
   private static class Multiset {
-    private final HashMap<Object, Integer> myContainer = new HashMap<Object, Integer>();
+    private final HashMap<Object, Integer> myContainer = new HashMap<>();
 
     public void add(Object element) {
       Integer number = myContainer.get(element);
@@ -865,7 +865,7 @@ public class CollectionBreakpointInstrumentor {
   }
 
   private static class ConcurrentIdentityHashMap {
-    private final Map<Object, CollectionInstanceLock> myContainer = new IdentityHashMap<Object, CollectionInstanceLock>();
+    private final Map<Object, CollectionInstanceLock> myContainer = new IdentityHashMap<>();
     private final ReentrantLock myLock = new ReentrantLock();
 
     public void add(Object obj) {
@@ -893,7 +893,7 @@ public class CollectionBreakpointInstrumentor {
 
   public static class CollectionInstanceLock {
     private final ReentrantLock myLock = new ReentrantLock();
-    private final ThreadLocal<Integer> myMethodEnterNumber = new ThreadLocal<Integer>();
+    private final ThreadLocal<Integer> myMethodEnterNumber = new ThreadLocal<>();
 
     private CollectionInstanceLock() {
       myMethodEnterNumber.set(0);
@@ -987,7 +987,7 @@ public class CollectionBreakpointInstrumentor {
   }
 
   private static class KnownMethodsSet {
-    private final Map<String, KnownMethod> myContainer = new HashMap<String, KnownMethod>();
+    private final Map<String, KnownMethod> myContainer = new HashMap<>();
 
     public void add(KnownMethod method) {
       if (!myContainer.containsKey(method.myMethodFullDesc)) {

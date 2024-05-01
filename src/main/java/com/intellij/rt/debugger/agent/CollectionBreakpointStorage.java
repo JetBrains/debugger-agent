@@ -23,8 +23,8 @@ public class CollectionBreakpointStorage {
   private static boolean ENABLED; // set from debugger
 
   static {
-    FIELD_MODIFICATIONS_STORAGE = new ConcurrentHashMap<CapturedField, FieldHistory>();
-    COLLECTION_MODIFICATIONS_STORAGE = new ConcurrentHashMap<CollectionWrapper, CollectionHistory>();
+    FIELD_MODIFICATIONS_STORAGE = new ConcurrentHashMap<>();
+    COLLECTION_MODIFICATIONS_STORAGE = new ConcurrentHashMap<>();
   }
 
   public static void saveFieldModification(String internalClsName,
@@ -107,7 +107,7 @@ public class CollectionBreakpointStorage {
   }
 
   private static class FieldHistory {
-    private final ArrayList<FieldModificationInfo> myModifications = new ArrayList<FieldModificationInfo>();
+    private final ArrayList<FieldModificationInfo> myModifications = new ArrayList<>();
     private final ReentrantLock myLock = new ReentrantLock();
 
     private void add(FieldModificationInfo info) {
@@ -133,7 +133,7 @@ public class CollectionBreakpointStorage {
     private Object[] getCollectionInstances() {
       myLock.lock();
       try {
-        ArrayList<Object> collectionInstances = new ArrayList<Object>();
+        ArrayList<Object> collectionInstances = new ArrayList<>();
         for (FieldModificationInfo info : myModifications) {
           collectionInstances.add(info.myCollectionInstance);
         }
@@ -146,7 +146,7 @@ public class CollectionBreakpointStorage {
   }
 
   private static class CollectionHistory {
-    private final ArrayList<CollectionModificationInfo> myOperations = new ArrayList<CollectionModificationInfo>();
+    private final ArrayList<CollectionModificationInfo> myOperations = new ArrayList<>();
     private final ReentrantLock myLock = new ReentrantLock();
 
     private void add(CollectionModificationInfo info) {

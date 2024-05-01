@@ -16,9 +16,9 @@ import java.util.*;
 @SuppressWarnings({"UseOfSystemOutOrSystemErr", "CallToPrintStackTrace", "rawtypes"})
 public final class CaptureAgent {
   private static Instrumentation ourInstrumentation;
-  private static final Set<Class> mySkipped = new HashSet<Class>();
+  private static final Set<Class> mySkipped = new HashSet<>();
 
-  private static final Map<String, List<InstrumentPoint>> myInstrumentPoints = new HashMap<String, List<InstrumentPoint>>();
+  private static final Map<String, List<InstrumentPoint>> myInstrumentPoints = new HashMap<>();
 
   public static void init(Properties properties, Instrumentation instrumentation) {
     ourInstrumentation = instrumentation;
@@ -135,7 +135,7 @@ public final class CaptureAgent {
 
   private static class CaptureInstrumentor extends ClassVisitor {
     private final List<? extends InstrumentPoint> myInstrumentPoints;
-    private final Map<String, String> myFields = new HashMap<String, String>();
+    private final Map<String, String> myFields = new HashMap<>();
     private String mySuperName;
     private boolean myIsInterface;
 
@@ -358,7 +358,7 @@ public final class CaptureAgent {
     Properties properties = new Properties();
     properties.load(new StringReader(capturePoints));
 
-    Set<String> classNames = new HashSet<String>();
+    Set<String> classNames = new HashSet<>();
 
     for (Map.Entry<Object, Object> entry : properties.entrySet()) {
       InstrumentPoint point = addPoint((String)entry.getKey(), (String)entry.getValue());
@@ -367,7 +367,7 @@ public final class CaptureAgent {
       }
     }
 
-    List<Class<?>> classes = new ArrayList<Class<?>>(classNames.size());
+    List<Class<?>> classes = new ArrayList<>(classNames.size());
     for (Class<?> aClass : ourInstrumentation.getAllLoadedClasses()) {
       if (classNames.contains(aClass.getName())) {
         classes.add(aClass);
@@ -379,7 +379,6 @@ public final class CaptureAgent {
         System.out.println("Capture agent: retransforming " + classes);
       }
 
-      //noinspection SSBasedInspection
       ourInstrumentation.retransformClasses(classes.toArray(new Class[0]));
     }
   }
@@ -407,7 +406,7 @@ public final class CaptureAgent {
                                                  KeyProvider keyProvider) {
     List<InstrumentPoint> points = myInstrumentPoints.get(className);
     if (points == null) {
-      points = new ArrayList<InstrumentPoint>(1);
+      points = new ArrayList<>(1);
       myInstrumentPoints.put(className, points);
     }
     InstrumentPoint point = new InstrumentPoint(capture, className, methodName, methodDesc, keyProvider);
