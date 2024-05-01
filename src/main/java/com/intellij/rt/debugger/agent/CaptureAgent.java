@@ -298,17 +298,20 @@ public final class CaptureAgent {
     }
   }
 
-  private static void invokeStorageMethod(MethodVisitor mv, String name) {
-    Method method = null;
+  static void invokeStorageMethod(MethodVisitor mv, String name) {
+    List<Method> applicable = new ArrayList<>();
     for (Method m : CaptureStorage.class.getMethods()) {
       if (name.equals(m.getName())) {
-        method = m;
-        break;
+        applicable.add(m);
       }
     }
-    if (method == null) {
+    if (applicable.isEmpty()) {
       throw new IllegalStateException("Unable to find Storage method " + name);
     }
+    if (applicable.size() > 1) {
+      throw new IllegalStateException("More than one Storage method with the name " + name);
+    }
+    Method method = applicable.get(0);
     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
             Type.getInternalName(CaptureStorage.class),
             name,
