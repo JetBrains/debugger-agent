@@ -2,8 +2,6 @@
 package com.intellij.rt.debugger.agent;
 
 
-import org.jetbrains.capture.org.objectweb.asm.Type;
-
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -14,6 +12,8 @@ import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.locks.ReentrantLock;
+
+import static com.intellij.rt.debugger.agent.CaptureAgent.getClassName;
 
 public class CollectionBreakpointStorage {
   private static final ConcurrentMap<CapturedField, FieldHistory> FIELD_MODIFICATIONS_STORAGE;
@@ -35,7 +35,7 @@ public class CollectionBreakpointStorage {
     if (!ENABLED) {
       return;
     }
-    String clsName = Type.getObjectType(internalClsName).getClassName();
+    String clsName = getClassName(internalClsName);
     CapturedField field = new CapturedField(clsName, fieldName, clsInstance);
     FIELD_MODIFICATIONS_STORAGE.putIfAbsent(field, new FieldHistory());
     FieldHistory history = FIELD_MODIFICATIONS_STORAGE.get(field);

@@ -16,6 +16,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 
+import static com.intellij.rt.debugger.agent.CaptureAgent.getInternalClsName;
+
 @SuppressWarnings({"UseOfSystemOutOrSystemErr", "CallToPrintStackTrace", "rawtypes"})
 public class CollectionBreakpointInstrumentor {
   private static final String OBJECT_TYPE = "Ljava/lang/Object;";
@@ -459,14 +461,6 @@ public class CollectionBreakpointInstrumentor {
 
   private static String getInstrumentorClassName() {
     return getInternalClsName(CollectionBreakpointInstrumentor.class);
-  }
-
-  public static String getInternalClsName(String typeDescriptor) {
-    return Type.getType(typeDescriptor).getInternalName();
-  }
-
-  public static String getInternalClsName(Class<?> cls) {
-    return Type.getInternalName(cls);
   }
 
   @SuppressWarnings("unused")

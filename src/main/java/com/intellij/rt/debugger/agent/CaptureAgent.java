@@ -27,7 +27,7 @@ public final class CaptureAgent {
 
       // remember already loaded and not instrumented classes to skip them during retransform
       for (Class aClass : instrumentation.getAllLoadedClasses()) {
-        List<InstrumentPoint> points = myInstrumentPoints.get(Type.getInternalName(aClass));
+        List<InstrumentPoint> points = myInstrumentPoints.get(getInternalClsName(aClass));
         if (points != null) {
           for (InstrumentPoint point : points) {
             if (!point.myCapture) {
@@ -100,23 +100,9 @@ public final class CaptureAgent {
             ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES);
 
             reader.accept(new CaptureInstrumentor(Opcodes.API_VERSION, writer, classPoints), 0);
+
             byte[] bytes = writer.toByteArray();
-
-            if (CaptureStorage.DEBUG) {
-              try {
-                FileOutputStream stream = new FileOutputStream("instrumented_" + className.replaceAll("/", "_") + ".class");
-                try {
-                  stream.write(bytes);
-                }
-                finally {
-                  stream.close();
-                }
-              }
-              catch (IOException e) {
-                e.printStackTrace();
-              }
-            }
-
+            storeClassForDebug(className, bytes);
             return bytes;
           }
           catch (Exception e) {
@@ -126,6 +112,24 @@ public final class CaptureAgent {
         }
       }
       return null;
+    }
+  }
+
+  @SuppressWarnings("TryFinallyCanBeTryWithResources")
+  static void storeClassForDebug(String className, byte[] bytes) {
+    if (CaptureStorage.DEBUG) {
+      try {
+        FileOutputStream stream = new FileOutputStream("instrumented_" + className.replaceAll("/", "_") + ".class");
+        try {
+          stream.write(bytes);
+        }
+        finally {
+          stream.close();
+        }
+      }
+      catch (IOException e) {
+        e.printStackTrace();
+      }
     }
   }
 
@@ -313,7 +317,7 @@ public final class CaptureAgent {
     }
     Method method = applicable.get(0);
     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
-            Type.getInternalName(CaptureStorage.class),
+            getInternalClsName(CaptureStorage.class),
             name,
             Type.getMethodDescriptor(method),
             false);
@@ -359,7 +363,7 @@ public final class CaptureAgent {
     for (Map.Entry<Object, Object> entry : properties.entrySet()) {
       InstrumentPoint point = addPoint((String)entry.getKey(), (String)entry.getValue());
       if (point != null) {
-        classNames.add(point.myClassName.replaceAll("/", "\\."));
+        classNames.add(getClassName(point.myClassName));
       }
     }
 
@@ -592,5 +596,17 @@ public final class CaptureAgent {
       addCapture("kotlinx/coroutines/debug/internal/DebugProbesImpl$CoroutineOwner", CONSTRUCTOR, THIS_KEY_PROVIDER);
       addInsert("kotlin/coroutines/jvm/internal/BaseContinuationImpl", "resumeWith", new CoroutineOwnerKeyProvider());
     }
+  }
+
+  static String getInternalClsName(String typeDescriptor) {
+    return Type.getType(typeDescriptor).getInternalName();
+  }
+
+  static String getInternalClsName(Class<?> cls) {
+    return Type.getInternalName(cls);
+  }
+
+  static String getClassName(String internalClsName) {
+    return Type.getObjectType(internalClsName).getClassName();
   }
 }
