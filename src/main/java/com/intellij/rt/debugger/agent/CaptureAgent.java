@@ -7,6 +7,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.StringReader;
 import java.lang.instrument.ClassFileTransformer;
+import java.lang.instrument.IllegalClassFormatException;
 import java.lang.instrument.Instrumentation;
 import java.lang.instrument.UnmodifiableClassException;
 import java.lang.reflect.Method;
@@ -37,6 +38,10 @@ public final class CaptureAgent {
         }
       }
 
+      if (Boolean.getBoolean("debugger.agent.enable.coroutines")
+              && Boolean.getBoolean("kotlinx.coroutines.debug.enable.flows.stack.trace")) {
+        instrumentation.addTransformer(new SharedFlowTransformer(), true);
+      }
       instrumentation.addTransformer(new CaptureTransformer(), true);
 
       // Trying to reinstrument java.lang.Thread
@@ -112,6 +117,132 @@ public final class CaptureAgent {
         }
       }
       return null;
+    }
+  }
+
+  private static class SharedFlowTransformer implements ClassFileTransformer {
+    @Override
+    public byte[] transform(final ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) {
+      if (!"kotlinx/coroutines/flow/SharedFlowImpl".equals(className)) {
+        return classfileBuffer;
+      }
+      ClassReader reader = new ClassReader(classfileBuffer);
+      ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES) {
+        @Override
+        protected ClassLoader getClassLoader() {
+          return loader;
+        }
+      };
+      reader.accept(new ClassVisitor(Opcodes.API_VERSION, writer) {
+        @Override
+        public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
+          MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
+          switch (name) {
+            case "wrap":
+              return new WrapMethodTransformer(mv);
+            case "unwrap":
+              return new UnwrapMethodTransformer(mv);
+          }
+          return mv;
+        }
+      }, 0);
+      return writer.toByteArray();
+    }
+
+    /*
+        Default wrap is:
+        ```
+          private fun <T> wrap(value: T): T = value
+        ```
+
+        which compiles to bytecode
+        ```
+          aload_1
+          areturn
+        ```
+
+        The transformed code should call the function
+        ```
+          private fun wrapDebuggerCapture(value: Any?): Any? {
+            val wrapper = FlowValueWrapper(value)
+            debuggerCapture(wrapper)
+            return wrapper
+          }
+        ```
+
+        so the transformation should yield the bytecode
+        ```
+           0: aload_0
+           1: aload_1
+           2: invokespecial #530                // Method wrapDebuggerCapture:(Ljava/lang/Object;)Ljava/lang/Object;
+           5: areturn
+        ```
+
+        Note that we could capture FlowValueWrapper.<init> and thus make captureHook lose its only purpose,
+        but to do that, FlowValueWrapper must be loaded into VM, and it's not called from anywhere
+        in the uninstrumented version. There are indeed ways to have it loaded, but none of them are
+        ideal replacements of a separate empty method (IMO).
+     */
+    private static class WrapMethodTransformer extends MethodVisitor {
+      public WrapMethodTransformer(MethodVisitor mv) {
+        super(Opcodes.API_VERSION, mv);
+      }
+
+      @Override
+      public void visitCode() {
+        super.visitCode();
+
+        mv.visitVarInsn(Opcodes.ALOAD, 0);
+        mv.visitVarInsn(Opcodes.ALOAD, 1);
+        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "kotlinx/coroutines/flow/SharedFlowImpl", "wrapDebuggerCapture", "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+        mv.visitInsn(Opcodes.ARETURN);
+      }
+    }
+
+    /*
+        Default unwrap is:
+        ```
+          private fun <T> unwrap(value: T): T = value
+        ```
+
+        which compiles to bytecode
+        ```
+          aload_1
+          areturn
+        ```
+
+        The transformed code should call the function
+        ```
+          private fun unwrapDebuggerCapture(value: Any?): Any? = (value as FlowValueWrapper<*>).value
+        ```
+
+        so the transformation should yield the bytecode
+        ```
+           0: aload_0
+           1: aload_1
+           2: invokespecial #530                // Method unwrapDebuggerCapture:(Ljava/lang/Object;)Ljava/lang/Object;
+           5: areturn
+        ```
+
+        Note that we could capture FlowValueWrapper.<init> and thus make captureHook lose its only purpose,
+        but to do that, FlowValueWrapper must be loaded into VM, and it's not called from anywhere
+        in the uninstrumented version. There are indeed ways to have it loaded, but none of them are
+        ideal replacements of a separate empty method (IMO).
+     */
+    private static class UnwrapMethodTransformer extends MethodVisitor {
+      public UnwrapMethodTransformer(MethodVisitor mv) {
+        super(Opcodes.API_VERSION, mv);
+      }
+
+      @Override
+      public void visitCode() {
+        super.visitCode();
+
+        mv.visitVarInsn(Opcodes.ALOAD, 0);
+        mv.visitVarInsn(Opcodes.ALOAD, 1);
+        mv.visitMethodInsn(Opcodes.INVOKESPECIAL, "kotlinx/coroutines/flow/SharedFlowImpl", "unwrapDebuggerCapture", "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+        mv.visitInsn(Opcodes.ARETURN);
+      }
     }
   }
 
@@ -590,10 +721,24 @@ public final class CaptureAgent {
     addInsert("com/sun/glass/ui/InvokeLaterDispatcher$Future", "run",
               new FieldKeyProvider("com/sun/glass/ui/InvokeLaterDispatcher$Future", "runnable"));
 
-    if (Boolean.getBoolean("debugger.agent.enable.coroutines") && !Boolean.getBoolean("kotlinx.coroutines.debug.enable.creation.stack.trace")) {
-      // Kotlin coroutines
-      addCapture("kotlinx/coroutines/debug/internal/DebugProbesImpl$CoroutineOwner", CONSTRUCTOR, THIS_KEY_PROVIDER);
-      addInsert("kotlin/coroutines/jvm/internal/BaseContinuationImpl", "resumeWith", new CoroutineOwnerKeyProvider());
+    if (Boolean.getBoolean("debugger.agent.enable.coroutines")) {
+      if (!Boolean.getBoolean("kotlinx.coroutines.debug.enable.creation.stack.trace")) {
+        // Kotlin coroutines
+        addCapture("kotlinx/coroutines/debug/internal/DebugProbesImpl$CoroutineOwner", CONSTRUCTOR, THIS_KEY_PROVIDER);
+        addInsert("kotlin/coroutines/jvm/internal/BaseContinuationImpl", "resumeWith", new CoroutineOwnerKeyProvider());
+      }
+      if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.flows.stack.trace")) {
+        // Flows
+
+        // SharedFlow
+        addCapture("kotlinx/coroutines/flow/SharedFlowImpl", "debuggerCapture", FIRST_PARAM);
+        addInsert("kotlinx/coroutines/flow/SharedFlowImpl", "emitInner", param(1));
+
+        // StateFlow
+        addCapture("kotlinx/coroutines/flow/StateFlowImpl", "updateInner", FIRST_PARAM);
+        addCapture("kotlinx/coroutines/flow/StateFlowImpl", CONSTRUCTOR, FIRST_PARAM);
+        addInsert("kotlinx/coroutines/flow/StateFlowImpl", "emitInner", param(1));
+      }
     }
   }
 
