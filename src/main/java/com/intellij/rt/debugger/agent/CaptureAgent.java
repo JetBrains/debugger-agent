@@ -163,11 +163,7 @@ public final class CaptureAgent {
 
         The transformed code should call the function
         ```
-          private fun wrapDebuggerCapture(value: Any?): Any? {
-            val wrapper = FlowValueWrapper(value)
-            debuggerCapture(wrapper)
-            return wrapper
-          }
+          private fun wrapDebuggerCapture(value: Any?) = FlowValueWrapper(value)
         ```
 
         so the transformation should yield the bytecode
@@ -177,11 +173,6 @@ public final class CaptureAgent {
            2: invokespecial #530                // Method wrapDebuggerCapture:(Ljava/lang/Object;)Ljava/lang/Object;
            5: areturn
         ```
-
-        Note that we could capture FlowValueWrapper.<init> and thus make captureHook lose its only purpose,
-        but to do that, FlowValueWrapper must be loaded into VM, and it's not called from anywhere
-        in the uninstrumented version. There are indeed ways to have it loaded, but none of them are
-        ideal replacements of a separate empty method (IMO).
      */
     private static class WrapMethodTransformer extends MethodVisitor {
       public WrapMethodTransformer(MethodVisitor mv) {
@@ -213,7 +204,7 @@ public final class CaptureAgent {
 
         The transformed code should call the function
         ```
-          private fun unwrapDebuggerCapture(value: Any?): Any? = (value as FlowValueWrapper<*>).value
+          private fun unwrapDebuggerCapture(value: Any?): Any? = (value as? FlowValueWrapper<*>)?.value ?: value
         ```
 
         so the transformation should yield the bytecode
@@ -223,11 +214,6 @@ public final class CaptureAgent {
            2: invokespecial #530                // Method unwrapDebuggerCapture:(Ljava/lang/Object;)Ljava/lang/Object;
            5: areturn
         ```
-
-        Note that we could capture FlowValueWrapper.<init> and thus make captureHook lose its only purpose,
-        but to do that, FlowValueWrapper must be loaded into VM, and it's not called from anywhere
-        in the uninstrumented version. There are indeed ways to have it loaded, but none of them are
-        ideal replacements of a separate empty method (IMO).
      */
     private static class UnwrapMethodTransformer extends MethodVisitor {
       public UnwrapMethodTransformer(MethodVisitor mv) {
@@ -731,7 +717,7 @@ public final class CaptureAgent {
         // Flows
 
         // SharedFlow
-        addCapture("kotlinx/coroutines/flow/SharedFlowImpl", "debuggerCapture", FIRST_PARAM);
+        addCapture("kotlinx/coroutines/flow/SharedFlowImpl$FlowValueWrapper", CONSTRUCTOR, THIS_KEY_PROVIDER);
         addInsert("kotlinx/coroutines/flow/SharedFlowImpl", "emitInner", param(1));
 
         // StateFlow
