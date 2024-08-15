@@ -78,7 +78,9 @@ public final class CaptureStorage {
     }
     try {
       Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
-      currentStacks.removeLast();
+      // frameworks may modify thread locals to avoid memory leaks, so do not fail if currentStacks is empty
+      // check https://youtrack.jetbrains.com/issue/IDEA-357455 for more details
+      currentStacks.pollLast();
       if (DEBUG) {
         System.out.println(
           "insert " + getCallerDescriptor(new Throwable()) + " <- " + getKeyText(key) + ", stack removed (" + currentStacks.size() + ")");
