@@ -600,13 +600,16 @@ public final class CaptureAgent {
         // Flows
 
         // SharedFlow
-        addCapture("kotlinx/coroutines/flow/SharedFlowImpl$FlowValueWrapper", CONSTRUCTOR, THIS_KEY_PROVIDER);
+        addCapture("kotlinx/coroutines/flow/internal/FlowValueWrapperInternal", CONSTRUCTOR, THIS_KEY_PROVIDER);
         addInsert("kotlinx/coroutines/flow/SharedFlowImpl", "emitInner", param(1));
 
         // StateFlow
         addCapture("kotlinx/coroutines/flow/StateFlowImpl", "updateInner", FIRST_PARAM);
         addCapture("kotlinx/coroutines/flow/StateFlowImpl", CONSTRUCTOR, FIRST_PARAM);
         addInsert("kotlinx/coroutines/flow/StateFlowImpl", "emitInner", param(1));
+
+        // debounce
+        addInsert("kotlinx/coroutines/flow/FlowKt__DelayKt", "emitInner$FlowKt__DelayKt", param(1));
       }
     }
   }
