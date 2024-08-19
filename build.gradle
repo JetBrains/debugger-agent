@@ -9,7 +9,7 @@ sourceCompatibility = JavaVersion.VERSION_1_7
 targetCompatibility = JavaVersion.VERSION_1_7
 
 dependencies {
-    implementation files("lib/asm-capture-9.1.jar")
+    implementation files("lib/asm-capture-9.6.1.jar")
 }
 
 task mainJar(type: Jar) {
