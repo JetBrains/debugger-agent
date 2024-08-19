@@ -12,3 +12,5 @@ See available versions at https://packages.jetbrains.team/maven/p/ij/intellij-de
 # Internal
 
 Building and publishing at https://buildserver.labs.intellij.net/project/ijplatform_IntelliJProjectDependencies_DebuggerAgent
+
+Repacked ASM version at https://buildserver.labs.intellij.net/buildConfiguration/ijplatform_ThirdPartyDependencies_Asm_ArtifactForCaptureAgent
