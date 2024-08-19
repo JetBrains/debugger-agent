@@ -14,8 +14,7 @@ import java.util.concurrent.ConcurrentMap;
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
 public final class CaptureStorage {
   public static final String GENERATED_INSERT_METHOD_POSTFIX = "$$$capture";
-  private static final ReferenceQueue KEY_REFERENCE_QUEUE = new ReferenceQueue();
-  private static final ConcurrentMap<WeakReference, CapturedStack> STORAGE = new ConcurrentHashMap<WeakReference, CapturedStack>();
+  private static final ConcurrentIdentityWeakHashMap<Object, CapturedStack> STORAGE = new ConcurrentIdentityWeakHashMap<>();
 
   @SuppressWarnings("SSBasedInspection")
   private static final ThreadLocal<Deque<CapturedStack>> CURRENT_STACKS = new ThreadLocal<Deque<CapturedStack>>() {
@@ -42,9 +41,7 @@ public final class CaptureStorage {
         System.out.println("capture " + getCallerDescriptor(exception) + " - " + getKeyText(key));
       }
       CapturedStack stack = createCapturedStack(exception, CURRENT_STACKS.get().peekLast());
-      processQueue();
-      WeakKey keyRef = new WeakKey(key, KEY_REFERENCE_QUEUE);
-      STORAGE.put(keyRef, stack);
+      STORAGE.put(key, stack);
     }
     catch (Exception e) {
       handleException(e);
@@ -57,8 +54,7 @@ public final class CaptureStorage {
       return;
     }
     try {
-      //noinspection SuspiciousMethodCalls
-      CapturedStack stack = STORAGE.get(new HardKey(key));
+      CapturedStack stack = STORAGE.get(key);
       Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
       currentStacks.add(stack);
       if (DEBUG) {
@@ -91,14 +87,21 @@ public final class CaptureStorage {
     }
   }
 
+  private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> coroutineGetCallerFrameMethods = new ConcurrentIdentityWeakHashMap<>();
+
   @SuppressWarnings("unused")
   public static Object coroutineOwner(Object key) {
     if (!ENABLED) {
       return key;
     }
     try {
-      Method getCallerFrameMethod = Class.forName("kotlin.coroutines.jvm.internal.CoroutineStackFrame", false, key.getClass().getClassLoader())
-              .getDeclaredMethod("getCallerFrame");
+      ClassLoader classLoader = key.getClass().getClassLoader();
+      Method getCallerFrameMethod = coroutineGetCallerFrameMethods.get(classLoader);
+      if (getCallerFrameMethod == null) {
+        getCallerFrameMethod = Class.forName("kotlin.coroutines.jvm.internal.CoroutineStackFrame", false, classLoader)
+                .getDeclaredMethod("getCallerFrame");
+        coroutineGetCallerFrameMethods.put(classLoader, getCallerFrameMethod);
+      }
       Object res = key;
       while (true) {
         //TODO: slow implementation for now, need to put the code directly into the insert point
@@ -119,55 +122,71 @@ public final class CaptureStorage {
 
   //// END - METHODS CALLED FROM THE USER PROCESS
 
-  private static void processQueue() {
-    WeakKey key;
-    while ((key = (WeakKey)KEY_REFERENCE_QUEUE.poll()) != null) {
-      STORAGE.remove(key);
-    }
-  }
+  private static class ConcurrentIdentityWeakHashMap<K, V> {
+    private final ReferenceQueue referenceQueue = new ReferenceQueue();
+    private final ConcurrentMap<WeakReference, V> map = new ConcurrentHashMap<>();
 
-  // only for map queries
-  private static class HardKey {
-    private final Object myKey;
-    private final int myHash;
-
-    HardKey(Object key) {
-      myKey = key;
-      myHash = System.identityHashCode(key);
+    @SuppressWarnings("UnusedReturnValue")
+    public V put(K key, V value) {
+      processQueue();
+      return map.put(new WeakKey(key, referenceQueue), value);
     }
 
-    @Override
-    public boolean equals(Object o) {
-      return this == o || (o instanceof WeakKey && ((WeakKey)o).get() == myKey);
+    public V get(K key) {
+      //noinspection SuspiciousMethodCalls
+      return map.get(new HardKey(key));
     }
 
-    public int hashCode() {
-      return myHash;
-    }
-  }
-
-  private static class WeakKey extends WeakReference {
-    private final int myHash;
-
-    WeakKey(Object key, ReferenceQueue q) {
-      //noinspection unchecked
-      super(key, q);
-      myHash = System.identityHashCode(key);
+    private void processQueue() {
+      WeakKey key;
+      while ((key = (WeakKey) referenceQueue.poll()) != null) {
+        map.remove(key);
+      }
     }
 
-    @Override
-    public boolean equals(Object o) {
-      if (this == o) return true;
-      if (!(o instanceof WeakKey)) return false;
-      Object t = get();
-      Object u = ((WeakKey)o).get();
-      if (t == null || u == null) return false;
-      return t == u;
+    // only for map queries
+    private static class HardKey {
+      private final Object myKey;
+      private final int myHash;
+
+      HardKey(Object key) {
+        myKey = key;
+        myHash = System.identityHashCode(key);
+      }
+
+      @Override
+      public boolean equals(Object o) {
+        return this == o || (o instanceof WeakKey && ((WeakKey) o).get() == myKey);
+      }
+
+      public int hashCode() {
+        return myHash;
+      }
     }
 
-    @Override
-    public int hashCode() {
-      return myHash;
+    private static class WeakKey extends WeakReference {
+      private final int myHash;
+
+      WeakKey(Object key, ReferenceQueue q) {
+        //noinspection unchecked
+        super(key, q);
+        myHash = System.identityHashCode(key);
+      }
+
+      @Override
+      public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof WeakKey)) return false;
+        Object t = get();
+        Object u = ((WeakKey) o).get();
+        if (t == null || u == null) return false;
+        return t == u;
+      }
+
+      @Override
+      public int hashCode() {
+        return myHash;
+      }
     }
   }
 
@@ -251,8 +270,7 @@ public final class CaptureStorage {
   // to be run from the debugger
   @SuppressWarnings("unused")
   public static Object[][] getRelatedStack(Object key, int limit) {
-    //noinspection SuspiciousMethodCalls
-    return wrapInArray(STORAGE.get(new HardKey(key)), limit);
+    return wrapInArray(STORAGE.get(key), limit);
   }
 
   private static String wrapInString(CapturedStack stack, int limit) throws IOException {
