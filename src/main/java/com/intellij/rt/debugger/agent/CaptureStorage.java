@@ -86,7 +86,7 @@ public final class CaptureStorage {
     }
   }
 
-  private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> coroutineGetCallerFrameMethods = new ConcurrentIdentityWeakHashMap<>();
+  private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> COROUTINE_GET_CALLER_FRAME_METHODS = new ConcurrentIdentityWeakHashMap<>();
 
   @SuppressWarnings("unused")
   public static Object coroutineOwner(Object key) {
@@ -94,13 +94,7 @@ public final class CaptureStorage {
       return key;
     }
     try {
-      ClassLoader classLoader = key.getClass().getClassLoader();
-      Method getCallerFrameMethod = coroutineGetCallerFrameMethods.get(classLoader);
-      if (getCallerFrameMethod == null) {
-        getCallerFrameMethod = Class.forName("kotlin.coroutines.jvm.internal.CoroutineStackFrame", false, classLoader)
-                .getDeclaredMethod("getCallerFrame");
-        coroutineGetCallerFrameMethods.put(classLoader, getCallerFrameMethod);
-      }
+      Method getCallerFrameMethod = getGetCallerFrameMethod(key);
       Object res = key;
       while (true) {
         //TODO: slow implementation for now, need to put the code directly into the insert point
@@ -120,6 +114,17 @@ public final class CaptureStorage {
   }
 
   //// END - METHODS CALLED FROM THE USER PROCESS
+
+  private static Method getGetCallerFrameMethod(Object key) throws NoSuchMethodException, ClassNotFoundException {
+    ClassLoader classLoader = key.getClass().getClassLoader();
+    Method getCallerFrameMethod = COROUTINE_GET_CALLER_FRAME_METHODS.get(classLoader);
+    if (getCallerFrameMethod == null) {
+      getCallerFrameMethod = Class.forName("kotlin.coroutines.jvm.internal.CoroutineStackFrame", false, classLoader)
+              .getDeclaredMethod("getCallerFrame");
+      COROUTINE_GET_CALLER_FRAME_METHODS.put(classLoader, getCallerFrameMethod);
+    }
+    return getCallerFrameMethod;
+  }
 
   private static class ConcurrentIdentityWeakHashMap<K, V> {
     private final ReferenceQueue referenceQueue = new ReferenceQueue();
