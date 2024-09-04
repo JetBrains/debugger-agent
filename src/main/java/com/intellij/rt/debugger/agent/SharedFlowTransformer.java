@@ -8,6 +8,12 @@ import java.security.ProtectionDomain;
 import static org.jetbrains.capture.org.objectweb.asm.Opcodes.F_SAME;
 
 class SharedFlowTransformer implements ClassFileTransformer {
+    private final boolean strictDoubleWrappingCheck;
+
+    public SharedFlowTransformer(boolean strictDoubleWrappingCheck) {
+        this.strictDoubleWrappingCheck = strictDoubleWrappingCheck;
+    }
+
     @Override
     public byte[] transform(final ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) {
         if (!"kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt".equals(className)) {
@@ -21,7 +27,7 @@ class SharedFlowTransformer implements ClassFileTransformer {
                 MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
                 switch (name) {
                     case "wrapInternal":
-                        return new WrapMethodTransformer(mv);
+                        return new WrapMethodTransformer(mv, strictDoubleWrappingCheck);
                     case "unwrapInternal":
                         return new UnwrapMethodTransformer(mv);
                 }
@@ -58,8 +64,11 @@ class SharedFlowTransformer implements ClassFileTransformer {
         ```
      */
     private static class WrapMethodTransformer extends MethodVisitor {
-        public WrapMethodTransformer(MethodVisitor mv) {
+        private final boolean strictDoubleWrappingCheck;
+
+        public WrapMethodTransformer(MethodVisitor mv, boolean strictDoubleWrappingCheck) {
             super(Opcodes.API_VERSION, mv);
+            this.strictDoubleWrappingCheck = strictDoubleWrappingCheck;
         }
 
         @Override
@@ -67,7 +76,14 @@ class SharedFlowTransformer implements ClassFileTransformer {
             super.visitCode();
 
             mv.visitVarInsn(Opcodes.ALOAD, 0);
-            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt", "wrapInternalDebuggerCapture", "(Ljava/lang/Object;)Ljava/lang/Object;", false);
+            String prefix;
+            if (strictDoubleWrappingCheck) {
+                prefix = "Strict";
+            }
+            else {
+                prefix = "Lenient";
+            }
+            mv.visitMethodInsn(Opcodes.INVOKESTATIC, "kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt", "wrapInternalDebuggerCapture" + prefix, "(Ljava/lang/Object;)Ljava/lang/Object;", false);
             mv.visitInsn(Opcodes.ARETURN);
             mv.visitFrame(F_SAME, 0, null, 0, null);
             mv.visitMaxs(1, 1);
