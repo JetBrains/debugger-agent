@@ -606,11 +606,8 @@ public final class CaptureAgent {
         addCapture("kotlinx/coroutines/flow/StateFlowImpl", "updateInner", FIRST_PARAM);
         addCapture("kotlinx/coroutines/flow/StateFlowImpl", CONSTRUCTOR, FIRST_PARAM);
 
-        // Channel
-        addCapture("kotlinx/coroutines/channels/BufferedChannel$BufferedChannelIterator", "getResultInner", FIRST_PARAM);
-
         // Common emitter
-        addInsert("kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt", "emitInternal", param(1));
+        addInsert("kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt", "debuggerCapture", FIRST_PARAM);
       }
     }
   }

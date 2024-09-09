@@ -65,7 +65,7 @@ public class DebuggerAgent {
   private static void initSharedFlowTransformer(Instrumentation instrumentation) {
     if (Boolean.getBoolean("debugger.agent.enable.coroutines")
             && Boolean.getBoolean("kotlinx.coroutines.debug.enable.flows.stack.trace")) {
-      instrumentation.addTransformer(new SharedFlowTransformer(Boolean.getBoolean("kotlinx.coroutines.debug.flows.double.wrapping.strict.check")), true);
+      instrumentation.addTransformer(new SharedFlowTransformer(), true);
     }
   }
 }
