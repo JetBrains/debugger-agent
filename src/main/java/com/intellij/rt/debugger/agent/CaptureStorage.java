@@ -11,7 +11,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-@SuppressWarnings({"UseOfSystemOutOrSystemErr", "rawtypes"})
+@SuppressWarnings({"UseOfSystemOutOrSystemErr"})
 public final class CaptureStorage {
   public static final String GENERATED_INSERT_METHOD_POSTFIX = "$$$capture";
   private static final ConcurrentIdentityWeakHashMap<Object, CapturedStack> STORAGE = new ConcurrentIdentityWeakHashMap<>();
@@ -127,40 +127,56 @@ public final class CaptureStorage {
   }
 
   private static class ConcurrentIdentityWeakHashMap<K, V> {
-    private final ReferenceQueue referenceQueue = new ReferenceQueue();
-    private final ConcurrentMap<WeakReference, V> map = new ConcurrentHashMap<>();
+    private final ReferenceQueue<K> referenceQueue = new ReferenceQueue<>();
+    private final ConcurrentMap<Key<K>, V> map = new ConcurrentHashMap<>();
 
     @SuppressWarnings("UnusedReturnValue")
     public V put(K key, V value) {
       processQueue();
-      return map.put(new WeakKey(key, referenceQueue), value);
+      return map.put(new WeakKey<>(key, referenceQueue), value);
     }
 
     public V get(K key) {
-      //noinspection SuspiciousMethodCalls
-      return map.get(new HardKey(key));
+      return map.get(new HardKey<>(key));
     }
 
     private void processQueue() {
-      WeakKey key;
-      while ((key = (WeakKey) referenceQueue.poll()) != null) {
+      WeakKey<K> key;
+      //noinspection unchecked
+      while ((key = (WeakKey<K>) referenceQueue.poll()) != null) {
         map.remove(key);
       }
     }
 
+    private interface Key<K> {
+      K get();
+    }
+
+    private static boolean equalKeys(Key<?> x, Key<?> y) {
+      if (x == y) return true;
+      Object kx = x.get();
+      Object ky = y.get();
+      return kx != null && kx == ky;
+    }
+
     // only for map queries
-    private static class HardKey {
-      private final Object myKey;
+    private static class HardKey<K> implements Key<K> {
+      private final K myKey;
       private final int myHash;
 
-      HardKey(Object key) {
+      HardKey(K key) {
         myKey = key;
         myHash = System.identityHashCode(key);
       }
 
       @Override
+      public K get() {
+        return myKey;
+      }
+
+      @Override
       public boolean equals(Object o) {
-        return this == o || (o instanceof WeakKey && ((WeakKey) o).get() == myKey);
+        return o instanceof Key<?> && equalKeys(this, (Key<?>) o);
       }
 
       public int hashCode() {
@@ -168,23 +184,17 @@ public final class CaptureStorage {
       }
     }
 
-    private static class WeakKey extends WeakReference {
+    private static class WeakKey<K> extends WeakReference<K> implements Key<K> {
       private final int myHash;
 
-      WeakKey(Object key, ReferenceQueue q) {
-        //noinspection unchecked
+      WeakKey(K key, ReferenceQueue<K> q) {
         super(key, q);
         myHash = System.identityHashCode(key);
       }
 
       @Override
       public boolean equals(Object o) {
-        if (this == o) return true;
-        if (!(o instanceof WeakKey)) return false;
-        Object t = get();
-        Object u = ((WeakKey) o).get();
-        if (t == null || u == null) return false;
-        return t == u;
+        return o instanceof Key<?> && equalKeys(this, (Key<?>) o);
       }
 
       @Override
