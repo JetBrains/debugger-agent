@@ -11,7 +11,12 @@ import java.util.Properties;
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
 public class DebuggerAgent {
   public static void premain(String args, Instrumentation instrumentation) {
-    // never instrument twice
+    if (DebuggerAgent.class.getClassLoader() != null) {
+      System.err.println("Debugger agent: agent should be loaded by bootstrap classloader, " +
+              "check jar name and 'Boot-Class-Path' value in the manifest");
+      return;
+    }
+
     if (System.getProperty("intellij.debug.agent") != null) {
       System.err.println("Debugger agent: more than one agent is not allowed, skipping");
       return;
