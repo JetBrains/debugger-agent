@@ -23,97 +23,198 @@ public final class CaptureStorage {
     }
   };
 
+  private static final ThreadLocal<Boolean> THROWABLE_CAPTURE_DISABLED = new ThreadLocal<Boolean>() {
+    @Override
+    protected Boolean initialValue() {
+      return false;
+    }
+  };
+
   @SuppressWarnings("StaticNonFinalField")
   public static boolean DEBUG; // set from debugger
   private static boolean ENABLED = true;
 
+  private static final StackTraceElement ASYNC_STACK_ELEMENT =
+          new StackTraceElement("--- Async", "Stack.Trace --- ", "captured by IntelliJ IDEA debugger", -1);
+
   //// METHODS CALLED FROM THE USER PROCESS
 
   @SuppressWarnings("unused")
-  public static void capture(Object key) {
-    if (!ENABLED) {
-      return;
-    }
-    try {
-      Throwable exception = new Throwable();
-      if (DEBUG) {
-        System.out.println("capture " + getCallerDescriptor(exception) + " - " + getKeyText(key));
-      }
-      CapturedStack stack = createCapturedStack(exception, CURRENT_STACKS.get().peekLast());
-      STORAGE.put(key, stack);
-    }
-    catch (Exception e) {
-      handleException(e);
-    }
+  public static void capture(final Object key) {
+    withoutThrowableCapture(new Runnable() {
+        @Override
+        public void run() {
+            captureInt(new Throwable(), key);
+        }
+    });
   }
 
   @SuppressWarnings("unused")
-  public static void insertEnter(Object key) {
-    if (!ENABLED) {
+  public static void captureThrowable(final Throwable throwable) {
+    if (THROWABLE_CAPTURE_DISABLED.get()) {
       return;
     }
-    try {
-      CapturedStack stack = STORAGE.get(key);
-      Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
-      currentStacks.add(stack);
-      if (DEBUG) {
-        System.out.println(
-          "insert " + getCallerDescriptor(new Throwable()) + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
+    withoutThrowableCapture(new Runnable() {
+      @Override
+      public void run() {
+        // TODO: support coroutine stack traces
+        captureInt(throwable, throwable);
       }
-    }
-    catch (Exception e) {
-      handleException(e);
-    }
+    });
   }
 
   @SuppressWarnings("unused")
-  public static void insertExit(Object key) {
+  private static void captureInt(final Throwable exception, final Object key) {
     if (!ENABLED) {
       return;
     }
-    try {
-      Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
-      // frameworks may modify thread locals to avoid memory leaks, so do not fail if currentStacks is empty
-      // check https://youtrack.jetbrains.com/issue/IDEA-357455 for more details
-      currentStacks.pollLast();
-      if (DEBUG) {
-        System.out.println(
-          "insert " + getCallerDescriptor(new Throwable()) + " <- " + getKeyText(key) + ", stack removed (" + currentStacks.size() + ")");
+    withoutThrowableCapture(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          if (DEBUG) {
+            System.out.println("capture " + getCallerDescriptorForLogging() + " - " + getKeyText(key));
+          }
+          CapturedStack stack = createCapturedStack(exception, CURRENT_STACKS.get().peekLast());
+          STORAGE.put(key, stack);
+        }
+        catch (Exception e) {
+          handleException(e);
+        }
       }
+    });
+  }
+
+  @SuppressWarnings("unused")
+  public static void insertEnter(final Object key) {
+    if (!ENABLED) {
+      return;
     }
-    catch (Exception e) {
-      handleException(e);
+    withoutThrowableCapture(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          CapturedStack stack = STORAGE.get(key);
+          Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
+          currentStacks.add(stack);
+          if (DEBUG) {
+            System.out.println(
+                    "insert " + getCallerDescriptorForLogging() + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
+          }
+        }
+        catch (Exception e) {
+          handleException(e);
+        }
+      }
+    });
+  }
+
+  @SuppressWarnings("unused")
+  public static void insertExit(final Object key) {
+    if (!ENABLED) {
+      return;
     }
+    withoutThrowableCapture(new Runnable() {
+      @Override
+      public void run() {
+        try {
+          Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
+          // frameworks may modify thread locals to avoid memory leaks, so do not fail if currentStacks is empty
+          // check https://youtrack.jetbrains.com/issue/IDEA-357455 for more details
+          currentStacks.pollLast();
+          if (DEBUG) {
+            System.out.println(
+                    "insert " + getCallerDescriptorForLogging() + " <- " + getKeyText(key) + ", stack removed (" + currentStacks.size() + ")");
+          }
+        } catch (Exception e) {
+          handleException(e);
+        }
+      }
+    });
   }
 
   private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> COROUTINE_GET_CALLER_FRAME_METHODS = new ConcurrentIdentityWeakHashMap<>();
 
   @SuppressWarnings("unused")
-  public static Object coroutineOwner(Object key) {
+  public static Object coroutineOwner(final Object key) {
     if (!ENABLED) {
       return key;
     }
-    try {
-      Method getCallerFrameMethod = getGetCallerFrameMethod(key);
-      Object res = key;
-      while (true) {
-        //TODO: slow implementation for now, need to put the code directly into the insert point
-        Object caller = getCallerFrameMethod.invoke(res);
-        if (caller == null) {
-          return res;
+    return withoutThrowableCapture(new Callable<Object>() {
+      @Override
+      public Object call() {
+        try {
+          Method getCallerFrameMethod = getGetCallerFrameMethod(key);
+          Object res = key;
+          while (true) {
+            //TODO: slow implementation for now, need to put the code directly into the insert point
+            Object caller = getCallerFrameMethod.invoke(res);
+            if (caller == null) {
+              return res;
+            }
+            if ("kotlinx.coroutines.debug.internal.DebugProbesImpl$CoroutineOwner".equals(caller.getClass().getName())) {
+              return caller;
+            }
+            res = caller;
+          }
+        } catch (Exception e) {
+          handleException(e);
         }
-        if ("kotlinx.coroutines.debug.internal.DebugProbesImpl$CoroutineOwner".equals(caller.getClass().getName())) {
-          return caller;
-        }
-        res = caller;
+        return key;
       }
-    } catch (Exception e) {
-      handleException(e);
+    });
+  }
+
+  @SuppressWarnings("unused")
+  public static StackTraceElement[] getAsyncStackTrace(final Throwable key) {
+    if (!ENABLED) {
+      return key.getStackTrace();
     }
-    return key;
+    return withoutThrowableCapture(new Callable<StackTraceElement[]>() {
+      @Override
+      public StackTraceElement[] call() {
+        try {
+          CapturedStack capturedStack = STORAGE.get(key);
+          if (capturedStack != null) {
+            ArrayList<StackTraceElement> stackTrace = getStackTrace(capturedStack, CaptureAgent.throwableAsyncStackDepthLimit());
+            return stackTrace.toArray(new StackTraceElement[0]);
+          }
+          // E.g., there is no captured stack if the exception was instantiated before the agent was loaded.
+        } catch (Exception e) {
+          handleException(e);
+        }
+        return key.getStackTrace();
+      }
+    });
   }
 
   //// END - METHODS CALLED FROM THE USER PROCESS
+
+  private interface Callable<T> {
+    T call();
+  }
+
+  // It's better to disable throwable instrumentation inside our own code for ease of debugging.
+  private static void withoutThrowableCapture(final Runnable runnable) {
+    withoutThrowableCapture(new Callable<Void>() {
+      @Override
+      public Void call() {
+        runnable.run();
+        return null;
+      }
+    });
+  }
+
+  // It's better to disable throwable instrumentation inside our own code for ease of debugging.
+  private static <T> T withoutThrowableCapture(Callable<T> action) {
+    Boolean oldValue = THROWABLE_CAPTURE_DISABLED.get();
+    THROWABLE_CAPTURE_DISABLED.set(true);
+    try {
+      return action.call();
+    } finally {
+      THROWABLE_CAPTURE_DISABLED.set(oldValue);
+    }
+  }
 
   private static Method getGetCallerFrameMethod(Object key) throws NoSuchMethodException, ClassNotFoundException {
     ClassLoader classLoader = key.getClass().getClassLoader();
@@ -249,8 +350,7 @@ public final class CaptureStorage {
 
     @Override
     public List<StackTraceElement> getStackTrace() {
-      StackTraceElement[] stackTrace = myException.getStackTrace();
-      return Arrays.asList(stackTrace).subList(1, stackTrace.length);
+      return Arrays.asList(myException.getStackTrace());
     }
 
     @Override
@@ -294,7 +394,7 @@ public final class CaptureStorage {
     ByteArrayOutputStream bas = new ByteArrayOutputStream();
     DataOutputStream dos = new DataOutputStream(bas);
     for (StackTraceElement elem : getStackTrace(stack, limit)) {
-      if (elem == null) {
+      if (elem == ASYNC_STACK_ELEMENT) {
         dos.writeBoolean(false);
       }
       else {
@@ -315,7 +415,7 @@ public final class CaptureStorage {
     Object[][] res = new Object[stackTrace.size()][];
     for (int i = 0; i < stackTrace.size(); i++) {
       StackTraceElement elem = stackTrace.get(i);
-      if (elem == null) {
+      if (elem == ASYNC_STACK_ELEMENT) {
         res[i] = null;
       }
       else {
@@ -325,19 +425,35 @@ public final class CaptureStorage {
     return res;
   }
 
+  private static List<StackTraceElement> trimInitAgentFrames(List<StackTraceElement> elements) {
+    int firstNotAgent = 0;
+    for (int i = 0; i < elements.size(); i++) {
+      if (isNotAgentFrame(elements.get(i))) {
+        firstNotAgent = i;
+        break;
+      }
+    }
+    return elements.subList(firstNotAgent, elements.size());
+  }
+
   private static ArrayList<StackTraceElement> getStackTrace(CapturedStack stack, int limit) {
     ArrayList<StackTraceElement> res = new ArrayList<>();
     while (stack != null && res.size() <= limit) {
-      List<StackTraceElement> stackTrace = stack.getStackTrace();
+      List<StackTraceElement> stackTrace = trimInitAgentFrames(stack.getStackTrace());
       if (stack instanceof DeepCapturedStack) {
-        int depth = 0;
         int size = stackTrace.size();
-        for (; depth < size; depth++) {
-          if (stackTrace.get(depth).getMethodName().endsWith(GENERATED_INSERT_METHOD_POSTFIX)) {
+        int newEnd = Integer.MAX_VALUE;
+        for (int i = 0; i < size; i++) {
+          StackTraceElement elem = stackTrace.get(i);
+          if (elem.getMethodName().endsWith(GENERATED_INSERT_METHOD_POSTFIX)) {
+            // End stack trace like this: ..., "foo$$$capture", "foo"
+            newEnd = i + 2;
+            break;
+          } else if (elem == ASYNC_STACK_ELEMENT) {
+            newEnd = i;
             break;
           }
         }
-        int newEnd = depth + 2;
         if (newEnd > size) {
           stack = null; // Insertion point was not found - stop
         }
@@ -351,7 +467,7 @@ public final class CaptureStorage {
       }
       res.addAll(stackTrace);
       if (stack != null) {
-        res.add(null);
+        res.add(ASYNC_STACK_ELEMENT);
       }
     }
     return res;
@@ -368,9 +484,21 @@ public final class CaptureStorage {
     e.printStackTrace();
   }
 
-  private static String getCallerDescriptor(Throwable e) {
-    StackTraceElement caller = e.getStackTrace()[1];
-    return caller.getClassName() + "." + caller.getMethodName();
+  private static boolean isNotAgentFrame(StackTraceElement elem) {
+    return !elem.getClassName().startsWith(CaptureStorage.class.getPackage().getName());
+  }
+
+  /** Expensive method, it should be used only for logging. */
+  private static String getCallerDescriptorForLogging() {
+    StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
+    // skip the first one -- it's Thread.getStackTrace
+    for (int i = 1; i < stackTrace.length; i++) {
+      StackTraceElement elem = stackTrace[i];
+      if (isNotAgentFrame(elem)) {
+        return elem.getClassName() + "." + elem.getMethodName();
+      }
+    }
+    return "unknown";
   }
 
   private static String getKeyText(Object key) {
