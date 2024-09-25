@@ -25,13 +25,22 @@ public final class CaptureAgent {
     try {
       applyProperties(properties);
 
+      if (instrumentThrowable()) {
+        instrumentation.addTransformer(new ThrowableTransformer(), true);
+      }
+
       // remember already loaded and not instrumented classes to skip them during retransform
       for (Class aClass : instrumentation.getAllLoadedClasses()) {
-        List<InstrumentPoint> points = myInstrumentPoints.get(getInternalClsName(aClass));
-        if (points != null) {
-          for (InstrumentPoint point : points) {
-            if (!point.myCapture) {
-              mySkipped.add(aClass);
+        if (instrumentThrowable() && ThrowableTransformer.THROWABLE_NAME.equals(getInternalClsName(aClass))) {
+          instrumentation.retransformClasses(aClass);
+        }
+        else {
+          List<InstrumentPoint> points = myInstrumentPoints.get(getInternalClsName(aClass));
+          if (points != null) {
+            for (InstrumentPoint point : points) {
+              if (!point.myCapture) {
+                mySkipped.add(aClass);
+              }
             }
           }
         }
@@ -623,5 +632,13 @@ public final class CaptureAgent {
 
   static String getClassName(String internalClsName) {
     return Type.getObjectType(internalClsName).getClassName();
+  }
+
+  private static boolean instrumentThrowable() {
+    return Boolean.parseBoolean(System.getProperty("debugger.agent.support.throwable", "true"));
+  }
+
+  static int throwableAsyncStackDepthLimit() {
+    return Integer.getInteger("debugger.agent.throwable.async.stack.depth", 1024);
   }
 }
