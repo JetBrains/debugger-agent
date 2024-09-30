@@ -598,15 +598,8 @@ public final class CaptureAgent {
       }
       if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.flows.stack.trace")) {
         // Flows
-
-        // SharedFlow
         addCapture("kotlinx/coroutines/flow/internal/FlowValueWrapperInternal", CONSTRUCTOR, THIS_KEY_PROVIDER);
 
-        // StateFlow
-        addCapture("kotlinx/coroutines/flow/StateFlowImpl", "updateInner", FIRST_PARAM);
-        addCapture("kotlinx/coroutines/flow/StateFlowImpl", CONSTRUCTOR, FIRST_PARAM);
-
-        // Common emitters
         addInsert("kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt", "emitInternal", param(1));
         addInsert("kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt", "debuggerCapture", FIRST_PARAM);
       }
