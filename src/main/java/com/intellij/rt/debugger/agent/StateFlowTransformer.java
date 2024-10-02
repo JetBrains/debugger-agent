@@ -22,19 +22,11 @@ class StateFlowTransformer implements ClassFileTransformer {
                     case "updateInner":
                         return new WrappingTransformer(mv, 1);
                     case "getValue":
-                        return new UnwrappingTransformer(mv, new Predicate() {
-                            @Override
-                            public boolean test(int opcode, String owner, String name, String descriptor) {
-                                return opcode == Opcodes.INVOKEVIRTUAL;
-                            }
-                        });
                     case "updateState":
                         return new UnwrappingTransformer(mv, new Predicate() {
                             @Override
                             public boolean test(int opcode, String owner, String name, String descriptor) {
-                                return opcode == Opcodes.INVOKEVIRTUAL
-                                        && "java/util/concurrent/atomic/AtomicReferenceFieldUpdater".equals(owner)
-                                        && "get".equals(name);
+                                return isAtomicGet(opcode, owner, name);
                             }
                         });
                     case "collect":
@@ -46,6 +38,12 @@ class StateFlowTransformer implements ClassFileTransformer {
         byte[] bytes = writer.toByteArray();
         CaptureAgent.storeClassForDebug(className, bytes);
         return bytes;
+    }
+
+    private static boolean isAtomicGet(int opcode, String owner, String name) {
+        return opcode == Opcodes.INVOKEVIRTUAL
+                && "java/util/concurrent/atomic/AtomicReferenceFieldUpdater".equals(owner)
+                && "get".equals(name);
     }
 
     /*
