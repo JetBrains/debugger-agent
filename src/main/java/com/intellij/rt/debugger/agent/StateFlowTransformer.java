@@ -13,14 +13,20 @@ class StateFlowTransformer implements ClassFileTransformer {
         }
         ClassReader reader = new ClassReader(classfileBuffer);
         ClassWriter writer = new ClassWriter(reader, 0);
+        final boolean[] isIdeaVersion = { false };
         reader.accept(new ClassVisitor(Opcodes.API_VERSION, writer) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                 MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
                 switch (name) {
                     case "<init>":
-                    case "updateInner":
                         return new WrappingTransformer(mv, 1);
+                    case "updateInner": {
+                        // the method is only present in the IDEA version of the coroutines library
+                        // (other versions don't have methods the instrumenter adds)
+                        isIdeaVersion[0] = true;
+                        return new WrappingTransformer(mv, 1);
+                    }
                     case "getValue":
                     case "updateState":
                         return new UnwrappingTransformer(mv, new Predicate() {
@@ -35,6 +41,11 @@ class StateFlowTransformer implements ClassFileTransformer {
                 return mv;
             }
         }, 0);
+
+        if (!isIdeaVersion[0]) {
+            return classfileBuffer;
+        }
+
         byte[] bytes = writer.toByteArray();
         CaptureAgent.storeClassForDebug(className, bytes);
         return bytes;
