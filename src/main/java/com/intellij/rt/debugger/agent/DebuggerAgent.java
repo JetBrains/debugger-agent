@@ -71,6 +71,10 @@ public class DebuggerAgent {
     if (Boolean.getBoolean("debugger.agent.enable.coroutines")
             && Boolean.getBoolean("kotlinx.coroutines.debug.enable.flows.stack.trace")) {
       instrumentation.addTransformer(new SharedFlowTransformer(), true);
+      // make state flow instrumentation switchable, so it could be turned off if instrumentation breaks the code
+      if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.mutable.state.flows.stack.trace")) {
+        instrumentation.addTransformer(new StateFlowTransformer(), true);
+      }
     }
   }
 }
