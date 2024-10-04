@@ -75,8 +75,7 @@ public final class CaptureStorage {
           if (DEBUG) {
             System.out.println("capture " + getCallerDescriptorForLogging() + " - " + getKeyText(key));
           }
-          CapturedStack stack = createCapturedStack(exception, CURRENT_STACKS.get().peekLast());
-          STORAGE.put(key, stack);
+          putCapturedStack(key, exception, CURRENT_STACKS.get().peekLast());
         }
         catch (Exception e) {
           handleException(e);
@@ -94,7 +93,7 @@ public final class CaptureStorage {
       @Override
       public void run() {
         try {
-          CapturedStack stack = STORAGE.get(key);
+          CapturedStack stack = getCapturedStack(key);
           Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
           currentStacks.add(stack);
           if (DEBUG) {
@@ -174,7 +173,7 @@ public final class CaptureStorage {
       @Override
       public StackTraceElement[] call() {
         try {
-          CapturedStack capturedStack = STORAGE.get(key);
+          CapturedStack capturedStack = getCapturedStack(key);
           if (capturedStack != null) {
             ArrayList<StackTraceElement> stackTrace = getStackTrace(capturedStack, CaptureAgent.throwableAsyncStackDepthLimit());
             return stackTrace.toArray(new StackTraceElement[0]);
@@ -318,6 +317,25 @@ public final class CaptureStorage {
     return new ExceptionCapturedStack(exception);
   }
 
+  private static void putCapturedStack(Object key, Throwable exception, CapturedStack insertMatch) {
+    if (key instanceof Throwable) {
+      if (insertMatch != null) {
+        assert !(insertMatch instanceof ExceptionCapturedStack) || ((ExceptionCapturedStack) insertMatch).myException != key;
+        STORAGE.put(key, insertMatch);
+      }
+    } else {
+      STORAGE.put(key, createCapturedStack(exception, insertMatch));
+    }
+  }
+
+  private static CapturedStack getCapturedStack(Object key) {
+    CapturedStack capturedStack = STORAGE.get(key);
+    if (key instanceof Throwable) {
+      return createCapturedStack(((Throwable) key), capturedStack);
+    }
+    return capturedStack;
+  }
+
   private interface CapturedStack {
     List<StackTraceElement> getStackTrace();
     int getRecursionDepth();
@@ -384,7 +402,7 @@ public final class CaptureStorage {
   // to be run from the debugger
   @SuppressWarnings("unused")
   public static Object[][] getRelatedStack(Object key, int limit) {
-    return wrapInArray(STORAGE.get(key), limit);
+    return wrapInArray(getCapturedStack(key), limit);
   }
 
   private static String wrapInString(CapturedStack stack, int limit) throws IOException {
