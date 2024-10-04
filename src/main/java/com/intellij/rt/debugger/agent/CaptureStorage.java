@@ -77,7 +77,8 @@ public final class CaptureStorage {
           }
           putCapturedStack(key, exception, CURRENT_STACKS.get().peekLast());
         }
-        catch (Exception e) {
+        // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
+        catch (AssertionError | Exception e) {
           handleException(e);
         }
       }
