@@ -15,11 +15,14 @@ class SharedFlowTransformer implements ClassFileTransformer {
         }
         ClassReader reader = new ClassReader(classfileBuffer);
         ClassWriter writer = new ClassWriter(reader, 0);
+        final boolean[] isLatestStableIjFork = { false };
         reader.accept(new ClassVisitor(Opcodes.API_VERSION, writer) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                 MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
                 switch (name) {
+                    case "debuggerCapture":
+                        isLatestStableIjFork[0] = true;
                     case "wrapInternal":
                         return new WrapMethodTransformer(mv);
                     case "unwrapInternal":
@@ -28,6 +31,11 @@ class SharedFlowTransformer implements ClassFileTransformer {
                 return mv;
             }
         }, 0);
+
+        if (!isLatestStableIjFork[0]) {
+            return classfileBuffer;
+        }
+
         byte[] bytes = writer.toByteArray();
         CaptureAgent.storeClassForDebug(className, bytes);
         return bytes;
