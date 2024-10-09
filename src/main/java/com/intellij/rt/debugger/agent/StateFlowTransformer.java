@@ -13,7 +13,16 @@ class StateFlowTransformer implements ClassFileTransformer {
         }
         ClassReader reader = new ClassReader(classfileBuffer);
         ClassWriter writer = new ClassWriter(reader, 0);
-        final boolean[] isIdeaVersion = { false };
+        // Here, we want to check two things:
+        //   - we instrument IJ fork of the coroutine library;
+        //   - we only instrument the latest version of the IJ fork (the only stable one).
+        // Older versions have two new methods: emitInner and updateInner,
+        // the stable one has only updateInner.
+        // So, to satisfy the two conditions above, we should check that
+        //   - updateInner is present (then isIjFork = true)
+        //   - and emitInner is not (then isLatestStableIjFork = true)
+        final boolean[] isIjFork = { false };
+        final boolean[] isLatestStableIjFork = { true };
         reader.accept(new ClassVisitor(Opcodes.API_VERSION, writer) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
@@ -22,10 +31,14 @@ class StateFlowTransformer implements ClassFileTransformer {
                     case "<init>":
                         return new WrappingTransformer(mv, 1);
                     case "updateInner": {
-                        // the method is only present in the IDEA version of the coroutines library
+                        // the method is only present in the IJ version of the coroutines library
                         // (other versions don't have methods the instrumenter adds)
-                        isIdeaVersion[0] = true;
+                        isIjFork[0] = true;
                         return new WrappingTransformer(mv, 1);
+                    }
+                    case "emitInner": {
+                        // the method is not present in the latest IJ version of the coroutines library
+                        isLatestStableIjFork[0] = false;
                     }
                     case "getValue":
                     case "updateState":
@@ -42,7 +55,9 @@ class StateFlowTransformer implements ClassFileTransformer {
             }
         }, 0);
 
-        if (!isIdeaVersion[0]) {
+        boolean shouldTransform = isIjFork[0] && isLatestStableIjFork[0];
+
+        if (!shouldTransform) {
             return classfileBuffer;
         }
 
