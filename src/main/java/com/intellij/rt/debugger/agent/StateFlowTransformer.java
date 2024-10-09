@@ -39,6 +39,7 @@ class StateFlowTransformer implements ClassFileTransformer {
                     case "emitInner": {
                         // the method is not present in the latest IJ version of the coroutines library
                         isLatestStableIjFork[0] = false;
+                        break;
                     }
                     case "getValue":
                     case "updateState":

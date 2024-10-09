@@ -23,6 +23,7 @@ class SharedFlowTransformer implements ClassFileTransformer {
                 switch (name) {
                     case "debuggerCapture":
                         isLatestStableIjFork[0] = true;
+                        break;
                     case "wrapInternal":
                         return new WrapMethodTransformer(mv);
                     case "unwrapInternal":
