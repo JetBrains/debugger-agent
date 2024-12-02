@@ -15,6 +15,20 @@ public class SpilledVariablesTransformer {
         }
     }
 
+    /**
+     * This transformer allows to see the value of a spilled local variable after the suspension point (see KT-63720).
+     * Fixes the problem of "optimized out local variable".
+     *
+     * When a visible dead object variable is spilled, Kotlin compiler generates the call to kotlin.coroutines.jvm.internal.SpillingKt#nullOutSpilledVariable,
+     * it takes the current value of the variable as an argument and returns null by default.
+     * ```
+     * fun nullOutSpilledVariable(value: Any?): Any? = null
+     * ```
+     * [NullOutSpilledVariableTransformer] transforms this function, so that it returns it's argument value, the current value of the variable.
+     * ```
+     * fun nullOutSpilledVariable(value: Any?): Any? = value
+     * ```
+     */
     private static class SpillingTransformer implements ClassFileTransformer {
         @Override
         public byte[] transform(final ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) {
@@ -46,7 +60,6 @@ public class SpilledVariablesTransformer {
             public NullOutSpilledVariableTransformer(MethodVisitor mv) {
                 super(Opcodes.API_VERSION, mv);
             }
-
             @Override
             public void visitCode() {
                 super.visitCode();
