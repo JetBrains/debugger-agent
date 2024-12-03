@@ -41,7 +41,7 @@ public class SpilledVariablesTransformer {
                     public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                         MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
                         if (name.equals("nullOutSpilledVariable")) {
-                            return new MethodVisitor(Opcodes.API_VERSION, superMethodVisitor) {
+                            return new MethodVisitor(api, superMethodVisitor) {
                                 @Override
                                 public void visitCode() {
                                     super.visitCode();
