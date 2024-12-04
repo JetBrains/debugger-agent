@@ -31,6 +31,7 @@ public class DebuggerAgent {
     CaptureAgent.init(properties, instrumentation);
     SuspendHelper.init(properties);
     CollectionBreakpointInstrumentor.init(instrumentation);
+    SpilledVariablesTransformer.init(instrumentation);
   }
 
   private static void readAndApplyProperties(String uri, Instrumentation instrumentation) {
