@@ -105,14 +105,8 @@ public final class CaptureAgent {
         List<InstrumentPoint> classPoints = myInstrumentPoints.get(className);
         if (classPoints != null) {
           try {
-            ClassReader reader = new ClassReader(classfileBuffer);
-            ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES);
-
-            reader.accept(new CaptureInstrumentor(Opcodes.API_VERSION, writer, classPoints), 0);
-
-            byte[] bytes = writer.toByteArray();
-            storeClassForDebug(className, bytes);
-            return bytes;
+            ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
+            return transformer.accept(new CaptureInstrumentor(Opcodes.API_VERSION, transformer.writer, classPoints), 0, true);
           }
           catch (Exception e) {
             System.out.println("Capture agent: failed to instrument " + className);

@@ -1,6 +1,8 @@
 package com.intellij.rt.debugger.agent;
 
-import org.jetbrains.capture.org.objectweb.asm.*;
+import org.jetbrains.capture.org.objectweb.asm.ClassVisitor;
+import org.jetbrains.capture.org.objectweb.asm.MethodVisitor;
+import org.jetbrains.capture.org.objectweb.asm.Opcodes;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
@@ -13,10 +15,9 @@ class SharedFlowTransformer implements ClassFileTransformer {
         if (!"kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt".equals(className)) {
             return classfileBuffer;
         }
-        ClassReader reader = new ClassReader(classfileBuffer);
-        ClassWriter writer = new ClassWriter(reader, 0);
+        ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, 0, loader);
         final boolean[] isLatestStableIjFork = { false };
-        reader.accept(new ClassVisitor(Opcodes.API_VERSION, writer) {
+        byte[] bytes = transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                 MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
@@ -31,13 +32,12 @@ class SharedFlowTransformer implements ClassFileTransformer {
                 }
                 return mv;
             }
-        }, 0);
+        }, 0, false);
 
         if (!isLatestStableIjFork[0]) {
             return classfileBuffer;
         }
 
-        byte[] bytes = writer.toByteArray();
         CaptureAgent.storeClassForDebug(className, bytes);
         return bytes;
     }

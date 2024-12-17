@@ -1,6 +1,9 @@
 package com.intellij.rt.debugger.agent;
 
-import org.jetbrains.capture.org.objectweb.asm.*;
+import org.jetbrains.capture.org.objectweb.asm.ClassVisitor;
+import org.jetbrains.capture.org.objectweb.asm.ClassWriter;
+import org.jetbrains.capture.org.objectweb.asm.MethodVisitor;
+import org.jetbrains.capture.org.objectweb.asm.Opcodes;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
@@ -17,10 +20,9 @@ class ThrowableTransformer implements ClassFileTransformer {
                             byte[] classfileBuffer) {
         if (THROWABLE_NAME.equals(className)) {
             try {
-                ClassReader reader = new ClassReader(classfileBuffer);
-                ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES);
+                ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
 
-                reader.accept(new ClassVisitor(Opcodes.API_VERSION, writer) {
+                return transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
                     @Override
                     public MethodVisitor visitMethod(final int access, String name, String descriptor, String signature, String[] exceptions) {
                         MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
@@ -58,11 +60,7 @@ class ThrowableTransformer implements ClassFileTransformer {
                                 return superMethodVisitor;
                         }
                     }
-                }, 0);
-
-                byte[] bytes = writer.toByteArray();
-                CaptureAgent.storeClassForDebug(className, bytes);
-                return bytes;
+                }, 0, true);
             }
             catch (Exception e) {
                 System.out.println("Capture agent: failed to instrument " + className);

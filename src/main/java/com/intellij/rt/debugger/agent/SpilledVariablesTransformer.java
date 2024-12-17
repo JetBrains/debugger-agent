@@ -1,6 +1,9 @@
 package com.intellij.rt.debugger.agent;
 
-import org.jetbrains.capture.org.objectweb.asm.*;
+import org.jetbrains.capture.org.objectweb.asm.ClassVisitor;
+import org.jetbrains.capture.org.objectweb.asm.ClassWriter;
+import org.jetbrains.capture.org.objectweb.asm.MethodVisitor;
+import org.jetbrains.capture.org.objectweb.asm.Opcodes;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
@@ -34,9 +37,8 @@ public class SpilledVariablesTransformer {
                 return classfileBuffer;
             }
             try {
-                ClassReader reader = new ClassReader(classfileBuffer);
-                ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES);
-                reader.accept(new ClassVisitor(Opcodes.API_VERSION, writer) {
+                ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
+                return transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
                     @Override
                     public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                         MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
@@ -52,10 +54,7 @@ public class SpilledVariablesTransformer {
                         }
                         return superMethodVisitor;
                     }
-                }, 0);
-                byte[] bytes = writer.toByteArray();
-                CaptureAgent.storeClassForDebug(className, bytes);
-                return bytes;
+                }, 0, true);
             } catch (Exception e) {
                 System.out.println("SpillingTransformer: failed to instrument " + className);
                 e.printStackTrace();

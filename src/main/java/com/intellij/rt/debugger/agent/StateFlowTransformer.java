@@ -11,8 +11,7 @@ class StateFlowTransformer implements ClassFileTransformer {
         if (!"kotlinx/coroutines/flow/StateFlowImpl".equals(className)) {
             return classfileBuffer;
         }
-        ClassReader reader = new ClassReader(classfileBuffer);
-        ClassWriter writer = new ClassWriter(reader, 0);
+        ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, 0, loader);
         // Here, we want to check two things:
         //   - we instrument IJ fork of the coroutine library;
         //   - we only instrument the latest version of the IJ fork (the only stable one).
@@ -23,7 +22,7 @@ class StateFlowTransformer implements ClassFileTransformer {
         //   - and emitInner is not (then isLatestStableIjFork = true)
         final boolean[] isIjFork = { false };
         final boolean[] isLatestStableIjFork = { true };
-        reader.accept(new ClassVisitor(Opcodes.API_VERSION, writer) {
+        byte[] bytes = transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
             @Override
             public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                 MethodVisitor mv = super.visitMethod(access, name, descriptor, signature, exceptions);
@@ -54,7 +53,7 @@ class StateFlowTransformer implements ClassFileTransformer {
                 }
                 return mv;
             }
-        }, 0);
+        }, 0, false);
 
         boolean shouldTransform = isIjFork[0] && isLatestStableIjFork[0];
 
@@ -62,7 +61,6 @@ class StateFlowTransformer implements ClassFileTransformer {
             return classfileBuffer;
         }
 
-        byte[] bytes = writer.toByteArray();
         CaptureAgent.storeClassForDebug(className, bytes);
         return bytes;
     }

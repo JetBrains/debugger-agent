@@ -481,18 +481,9 @@ public class CollectionBreakpointInstrumentor {
 
       if (myCollectionsToTransform.containsKey(className) || myClassesToTransform.contains(className)) {
         try {
-          ClassReader reader = new ClassReader(classfileBuffer);
-          ClassWriter writer = new ClassWriter(reader, ClassWriter.COMPUTE_FRAMES);
-
-          MyClassVisitor instrumentor = new MyClassVisitor(className, Opcodes.API_VERSION, writer);
-          reader.accept(instrumentor, ClassReader.EXPAND_FRAMES);
-          byte[] bytes = writer.toByteArray();
-
-          if (DEBUG) {
-            writeDebugInfo(className, bytes);
-          }
-
-          return bytes;
+          ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
+          return transformer.accept(new MyClassVisitor(className, Opcodes.API_VERSION, transformer.writer),
+                  ClassReader.EXPAND_FRAMES, true);
         }
         catch (Exception e) {
           processFailedToInstrumentError(className, e);
