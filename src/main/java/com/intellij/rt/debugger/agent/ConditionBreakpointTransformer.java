@@ -75,27 +75,6 @@ public class ConditionBreakpointTransformer {
     private static class BreakpointInstrumentalist implements ClassFileTransformer {
         @Override
         public byte[] transform(final ClassLoader loader, final String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-            if (className.contains("Instrumentation$Generated$Condition")) {
-                ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
-                ClassVisitor classVisitor = new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
-                };
-
-                transformer.acceptOriginalByteCode(classVisitor, 0);
-                MethodVisitor mv = classVisitor.visitMethod(
-                        Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC,
-                        breakpointHitMethodName,
-                        breakpointHitSignature,
-                        null,
-                        null
-                );
-                mv.visitCode();
-                mv.visitInsn(Opcodes.RETURN);
-                mv.visitMaxs(0, 0);
-                mv.visitEnd();
-
-                return transformer.produceModifiedCode(true);
-            }
-
             final Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods = myBreakpoints.get(className);
             if (methods == null || methods.isEmpty()) {
                 return null;
