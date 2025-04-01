@@ -25,6 +25,7 @@ class InstrumentationBreakpointInfo {
 }
 
 public class ConditionBreakpointTransformer {
+    private static final String conditionCheckMethodName = "conditionCheck";
     private static final String breakpointHitMethodName = "breakpointHit";
     private static final String breakpointHitSignature = "()V";
 
@@ -132,18 +133,9 @@ public class ConditionBreakpointTransformer {
 
                                 mv.visitMethodInsn(Opcodes.INVOKESTATIC,
                                         instrumentationBreakpointInfo.fragmentClassName,
-                                        "generated_for_debugger_fun",
+                                        conditionCheckMethodName,
                                         instrumentationBreakpointInfo.methodSignature,
                                         false);
-
-                                Label skipLabel = new Label();
-                                mv.visitJumpInsn(Opcodes.IFEQ, skipLabel);
-                                mv.visitMethodInsn(Opcodes.INVOKESTATIC,
-                                        instrumentationBreakpointInfo.fragmentClassName,
-                                        breakpointHitMethodName,
-                                        breakpointHitSignature,
-                                        false);
-                                mv.visitLabel(skipLabel);
                             }
                         };
                     }
