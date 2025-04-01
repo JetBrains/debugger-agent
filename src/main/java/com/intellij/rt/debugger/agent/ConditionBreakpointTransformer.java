@@ -71,6 +71,7 @@ public class ConditionBreakpointTransformer {
             methods.put(methodName, lineNumbers);
         }
         lineNumbers.put(lineNumber, new InstrumentationBreakpointInfo(lineNumber, fragmentClassName, methodSignature, argumentNames));
+        System.err.println("V6: addBreakpoint: " + className + "#" + methodName + " at line " + lineNumber + " calling from " + fragmentClassName);
     }
 
     private static class BreakpointInstrumentalist implements ClassFileTransformer {
@@ -113,6 +114,7 @@ public class ConditionBreakpointTransformer {
                             public void visitLineNumber(int line, Label start) {
                                 InstrumentationBreakpointInfo instrumentationBreakpointInfo = lineNumbers.get(line);
                                 if (instrumentationBreakpointInfo != null) {
+                                    System.err.println("Instrumenting!!!: " + instrumentationBreakpointInfo.methodSignature);
                                     addInstrumentationCondition(instrumentationBreakpointInfo, start);
                                 }
                                 super.visitLineNumber(line, start);
@@ -121,12 +123,18 @@ public class ConditionBreakpointTransformer {
 
                             private void addInstrumentationCondition(InstrumentationBreakpointInfo instrumentationBreakpointInfo, Label start) {
                                 for (String argumentName : instrumentationBreakpointInfo.argumentNames) {
-                                    for (LocalVariableNode localVariable : methodNode.localVariables) {
-                                        if (localVariable.name.equals(argumentName) /*&&
+                                    System.err.println("Mega argument: " + argumentName);
+                                    if (argumentName.equals("this")/* || argumentName.startsWith("this$")*/) {
+                                        mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                    }
+                                    else {
+                                        for (LocalVariableNode localVariable : methodNode.localVariables) {
+                                            if (localVariable.name.equals(argumentName) /*&&
                                                 start.getOffset() >= localVariable.start.getLabel().getOffset() &&
                                                 start.getOffset() < localVariable.end.getLabel().getOffset()*/) {
-                                            Type type = Type.getType(localVariable.desc);
-                                            mv.visitVarInsn(type.getOpcode(Opcodes.ILOAD), localVariable.index);
+                                                Type type = Type.getType(localVariable.desc);
+                                                mv.visitVarInsn(type.getOpcode(Opcodes.ILOAD), localVariable.index);
+                                            }
                                         }
                                     }
                                 }
