@@ -10,6 +10,8 @@ import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
 import java.util.*;
 
+import static com.intellij.rt.debugger.agent.CaptureAgent.getInternalClsName;
+
 class InstrumentationBreakpointInfo {
     final Integer lineNumber;
     final String fragmentClassName;
@@ -86,7 +88,9 @@ public class ConditionBreakpointTransformer {
                 final ClassNode classNode = new ClassNode();
                 new ClassReader(classfileBuffer).accept(classNode, 0);
 
-                ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
+                ClassTransformer transformer = new ClassTransformer(
+                        className, classfileBuffer, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS, loader
+                );
 
                 return transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
                     @Override
@@ -122,6 +126,15 @@ public class ConditionBreakpointTransformer {
                             }
 
                             private void addInstrumentationCondition(InstrumentationBreakpointInfo instrumentationBreakpointInfo, Label start) {
+                                Label startTry = new Label();
+                                Label endTry = new Label();
+                                Label catchBlock = new Label();
+                                Label afterIf = new Label();
+
+                                mv.visitTryCatchBlock(startTry, endTry, catchBlock, "java/lang/Throwable");
+
+                                mv.visitLabel(startTry);
+
                                 for (String argumentName : instrumentationBreakpointInfo.argumentNames) {
                                     System.err.println("Mega argument: " + argumentName);
                                     if (argumentName.equals("this")/* || argumentName.startsWith("this$")*/) {
@@ -139,11 +152,25 @@ public class ConditionBreakpointTransformer {
                                     }
                                 }
 
+                                String fragmentClassName = instrumentationBreakpointInfo.fragmentClassName;
+                                int instrumentationId = extractIdFromFragmentClassName(fragmentClassName);
                                 mv.visitMethodInsn(Opcodes.INVOKESTATIC,
-                                        instrumentationBreakpointInfo.fragmentClassName,
+                                        fragmentClassName,
                                         conditionCheckMethodName,
                                         instrumentationBreakpointInfo.methodSignature,
                                         false);
+                                mv.visitLabel(endTry);
+                                mv.visitJumpInsn(Opcodes.GOTO, afterIf);
+
+                                mv.visitLabel(catchBlock);
+                                mv.visitIntInsn(Opcodes.BIPUSH, instrumentationId);
+                                mv.visitMethodInsn(Opcodes.INVOKESTATIC,
+                                        getInternalClsName(ConditionBreakpointTransformer.class),
+                                        "instrumentationException",
+                                        "(Ljava/lang/Throwable;I)V",
+                                        false);
+
+                                mv.visitLabel(afterIf);
                             }
                         };
                     }
@@ -154,5 +181,24 @@ public class ConditionBreakpointTransformer {
             }
             return null;
         }
+    }
+
+    @SuppressWarnings("unused")
+    public static void instrumentationException(Throwable e, int instrumentationId) {
+        System.err.println("Instrumentation exception from id " + instrumentationId + ":");
+        e.printStackTrace();
+    }
+
+    private static int extractIdFromFragmentClassName(String fragmentClassName) {
+        // Find the last digit sequence in the class name
+        int i = fragmentClassName.length() - 1;
+        while (i >= 0 && Character.isDigit(fragmentClassName.charAt(i))) {
+            i--;
+        }
+        if (i < fragmentClassName.length() - 1) {
+            return Integer.parseInt(fragmentClassName.substring(i + 1));
+        }
+        return -1; // Return -1 if no number is found
+
     }
 }
