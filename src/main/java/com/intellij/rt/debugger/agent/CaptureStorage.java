@@ -119,10 +119,6 @@ public final class CaptureStorage {
             }
             System.out.println("--------------------INSERT ENTER END:" + "CURRENT_STACKS.size" +  currentStacks.size() +"------------------------------------------");
           }
-//          if (DEBUG) {
-//            System.out.println(
-//                    "insert " + getCallerDescriptorForLogging() + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
-//          }
         }
         catch (Exception e) {
           handleException(e);
@@ -166,6 +162,10 @@ public final class CaptureStorage {
       @Override
       public Object call() {
         try {
+          Class<?> coroutineStackFrame = Class.forName("kotlin.coroutines.jvm.internal.CoroutineStackFrame", false, key.getClass().getClassLoader());
+          if (!coroutineStackFrame.isInstance(key)) {
+            return null;
+          }
           Method getCallerFrameMethod = getGetCallerFrameMethod(key);
           Object res = key;
           while (true) {
@@ -337,7 +337,15 @@ public final class CaptureStorage {
       }
       return stack;
     }
-    return new ExceptionCapturedStack(exception);
+    ExceptionCapturedStack exceptionStack = new ExceptionCapturedStack(exception);
+    System.out.println("BTW --- AAA: exception captured stack trace: \n " + exceptionStack.stringRepr()+ "----- \n");
+    return exceptionStack;
+  }
+
+  private static CapturedStack createExceptionCapturedStack(Throwable exception) {
+    ExceptionCapturedStack exceptionStack = new ExceptionCapturedStack(exception);
+    System.out.println("createExceptionCapturedStack: --- AAA: exception captured stack trace: \n " + exceptionStack.stringRepr()+ "----- \n");
+    return exceptionStack;
   }
 
   private interface CapturedStack {

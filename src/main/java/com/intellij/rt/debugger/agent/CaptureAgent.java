@@ -381,7 +381,6 @@ public final class CaptureAgent {
       if (CaptureStorage.DEBUG) {
         System.out.println("Capture agent: retransforming " + classes);
       }
-      System.out.println("aaaaa still ok");
       ourInstrumentation.retransformClasses(classes.toArray(new Class[0]));
     }
   }
@@ -420,6 +419,18 @@ public final class CaptureAgent {
 
   private static final KeyProvider FIRST_PARAM = param(0);
 
+  static final KeyProvider COROUTINE_OWNER_KEY_PROVIDER = new KeyProvider() {
+    @Override
+    public void loadKey(MethodVisitor mv,
+                        boolean isStatic,
+                        Type[] argumentTypes,
+                        String methodDisplayName,
+                        CaptureInstrumentor instrumentor) {
+      mv.visitVarInsn(Opcodes.ALOAD, 0);
+      invokeStorageMethod(mv, "coroutineOwner");
+    }
+  };
+
   static final KeyProvider THIS_KEY_PROVIDER = new KeyProvider() {
     @Override
     public void loadKey(MethodVisitor mv,
@@ -431,6 +442,18 @@ public final class CaptureAgent {
         throw new IllegalStateException("This is not available in a static method " + methodDisplayName);
       }
       mv.visitVarInsn(Opcodes.ALOAD, 0);
+    }
+  };
+
+  static final KeyProvider COMPLETION_ARG_PROVIDER = new KeyProvider() {
+    @Override
+    public void loadKey(MethodVisitor mv,
+                        boolean isStatic,
+                        Type[] argumentTypes,
+                        String methodDisplayName,
+                        CaptureInstrumentor instrumentor) {
+      mv.visitVarInsn(Opcodes.ALOAD, 1);
+      invokeStorageMethod(mv, "coroutineOwner");
     }
   };
 
@@ -596,9 +619,64 @@ public final class CaptureAgent {
 
     if (Boolean.getBoolean("debugger.agent.enable.coroutines")) {
       if (!Boolean.getBoolean("kotlinx.coroutines.debug.enable.creation.stack.trace")) {
-        // Kotlin coroutines
+        /**
+         * Previously, we captured stack trace when the new coroutine was created (intercepting the CoroutineOwner.<init> call),
+         * the captured frames were added to the stack when the corotuine (corresponding to the CoroutineOwner) was resumed, and removed when the coroutine was suspended.
+         * E.g.
+         * runBlocking { // capture Coroutine1
+         *   foo {
+         *     //Breakpoint!
+         *     println() // insert frames of Coroutine1
+         *   }
+         * }
+         * The stack trace would be:
+         * println()
+         * foo
+         * runBlocking // this frame was saved, when Coroutine1 was created
+         *
+         * But there are coroutine builders, like withContext, which do not create a new coroutine,
+         * but create a new instance of suspendable computation and dispatch it for execution.
+         * E.g.
+         * runBlocking { // capture Coroutine1
+         *   foo {
+         *      withContext(Dispatchers.Default) {
+         *         //Breakpoint!
+         *         println()  // insert frames of Coroutine1 (only one frame was captured)
+         *      }
+         *   }
+         * }
+         *
+         * With the previous solution the stack trace would be:
+         * println()
+         * runBlocking
+         *
+         * If we capture the corotuine frames every time it's execution is dispatched (every time when createCoroutineUnintercepted is invoked),
+         * then we will not lose all the intermediate frames. In the case above:
+         *
+         * runBlocking { // capture stack for Coroutine1
+         *   foo {
+         *      withContext(Dispatchers.Default) { // still the same coroutine but dispatched, capture stack for Coroutine1
+         *         //Breakpoint!
+         *         println()  // insert frames of Coroutine1 (only one frame was captured)
+         *      }
+         *   }
+         * }
+         *
+         * The stack trace is now:
+         * println()
+         * withContext
+         * foo
+         * runBlocking
+         */
+        
+        // NOTE: The captured stack trace is only saved in GENERAL_STORAGE map if the CoroutineOwner already exists,
+        // otherwise it will be captured when the CoroutineOwner constructor is called.
+
+        // TODO: support startCoroutine, startCoroutineUndispatched or choose a more straightforward capture point.
+        addCapture("kotlinx/coroutines/intrinsics/CancellableKt", "startCoroutineCancellable", COMPLETION_ARG_PROVIDER);
+        //addCapture("kotlin/coroutines/intrinsics/IntrinsicsKt", "createCoroutineUnintercepted", COMPLETION_ARG_PROVIDER);
         addCapture("kotlinx/coroutines/debug/internal/DebugProbesImpl$CoroutineOwner", CONSTRUCTOR, THIS_KEY_PROVIDER);
-        addInsert("kotlin/coroutines/jvm/internal/BaseContinuationImpl", "resumeWith", new CoroutineOwnerKeyProvider());
+        addInsert("kotlin/coroutines/jvm/internal/BaseContinuationImpl", "resumeWith", COROUTINE_OWNER_KEY_PROVIDER);
       }
       if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.flows.stack.trace")) {
         // Flows
