@@ -4,9 +4,9 @@ plugins {
 apply plugin: 'maven-publish'
 
 // BUILD_NUMBER env is set by TeamCity
-version = System.getenv("BUILD_NUMBER") ?: "1.0-SNAPSHOT"
-sourceCompatibility = JavaVersion.VERSION_1_7
-targetCompatibility = JavaVersion.VERSION_1_7
+version = System.getenv("BUILD_NUMBER") ?: "1.9-my-SNAPSHOT"
+sourceCompatibility = JavaVersion.VERSION_1_8
+targetCompatibility = JavaVersion.VERSION_1_8
 
 dependencies {
     implementation files("lib/asm-capture-9.6.1.jar")

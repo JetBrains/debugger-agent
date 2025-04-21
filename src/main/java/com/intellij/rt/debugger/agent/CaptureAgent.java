@@ -381,7 +381,7 @@ public final class CaptureAgent {
       if (CaptureStorage.DEBUG) {
         System.out.println("Capture agent: retransforming " + classes);
       }
-
+      System.out.println("aaaaa still ok");
       ourInstrumentation.retransformClasses(classes.toArray(new Class[0]));
     }
   }
@@ -413,6 +413,7 @@ public final class CaptureAgent {
       myInstrumentPoints.put(className, points);
     }
     InstrumentPoint point = new InstrumentPoint(capture, className, methodName, methodDesc, keyProvider);
+    System.out.println("Capture agent: added point " + point);
     points.add(point);
     return point;
   }

@@ -45,6 +45,7 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
+    if (key == null) return;
     withoutThrowableCapture(new Runnable() {
       @Override
       public void run() {
@@ -54,6 +55,13 @@ public final class CaptureStorage {
           }
           CapturedStack stack = CURRENT_STACKS.get().peekLast();
           STORAGE_GENERAL.put(key, createCapturedStack(new Throwable(), stack));
+          if (DEBUG) {
+            System.out.println("--------------------CAPTURE: took top stack from CURRENT_STACKS and put to STORAGE_GENERAL for key " + getKeyText(key) + "CURRENT_STACKS.size = " + CURRENT_STACKS.get().size() + "------------------------------------------");
+            if (STORAGE_GENERAL.get(key) != null) {
+              System.out.println(STORAGE_GENERAL.get(key).stringRepr());
+            }
+            System.out.println("--------------------CAPTURE END: took top stack from CURRENT_STACKS " + CURRENT_STACKS.get().size() + "------------------------------------------");
+          }
         }
         // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
         catch (AssertionError | Exception e) {
@@ -73,10 +81,10 @@ public final class CaptureStorage {
       public void run() {
         // TODO: support coroutine stack traces
         try {
-          if (DEBUG) {
-            System.out.println("captureThrowable " + getCallerDescriptorForLogging() + " - " + getKeyText(throwable));
-          }
           CapturedStack stack = CURRENT_STACKS.get().peekLast();
+          if (DEBUG) {
+            System.out.println("captureThrowable " + getCallerDescriptorForLogging() + " - " + getKeyText(throwable) + "CURRENT_STACKS.size = " + CURRENT_STACKS.get().size() + "------------------------------------------");
+          }
           if (stack != null) {
             // Ensure that we don't leak throwable here, IDEA-360126
             assert !(stack instanceof ExceptionCapturedStack) ||
@@ -105,9 +113,16 @@ public final class CaptureStorage {
           Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
           currentStacks.add(stack);
           if (DEBUG) {
-            System.out.println(
-                    "insert " + getCallerDescriptorForLogging() + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
+            System.out.println("--------------------INSERT ENTER: take from STORAGE_GENERAL for " + getKeyText(key) + " and add to CURRENT_STACKS " + currentStacks.size()  +"------------------------------------------");
+            if (stack != null) {
+              System.out.println(stack.stringRepr());
+            }
+            System.out.println("--------------------INSERT ENTER END:" + "CURRENT_STACKS.size" +  currentStacks.size() +"------------------------------------------");
           }
+//          if (DEBUG) {
+//            System.out.println(
+//                    "insert " + getCallerDescriptorForLogging() + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
+//          }
         }
         catch (Exception e) {
           handleException(e);
@@ -328,6 +343,17 @@ public final class CaptureStorage {
   private interface CapturedStack {
     List<StackTraceElement> getStackTrace();
     int getRecursionDepth();
+    default String stringRepr() {
+      StringBuilder sb = new StringBuilder();
+      for (StackTraceElement elem : getStackTrace()) {
+        if (sb.length() > 0) {
+          sb.append("\n");
+        }
+        sb.append("       ");
+        sb.append(elem.toString());
+      }
+      return sb.toString();
+    }
   }
 
   private static class UnwindCapturedStack implements CapturedStack {
