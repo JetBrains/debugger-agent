@@ -67,7 +67,7 @@ public class ConditionBreakpointTransformer {
             methods = new LinkedHashMap<>();
             myBreakpoints.put(className, methods);
         }
-        Map<Integer, InstrumentationBreakpointInfo> lineNumbers = methods.get(methodName);
+        Map<Integer, InstrumentationBreakpointInfo> lineNumbers = getLineNumbers(methodName, methods);
         if (lineNumbers == null) {
             lineNumbers = new LinkedHashMap<>();
             methods.put(methodName, lineNumbers);
@@ -96,7 +96,7 @@ public class ConditionBreakpointTransformer {
                     @Override
                     public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                         MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
-                        final Map<Integer, InstrumentationBreakpointInfo> lineNumbers = methods.get(name);
+                        final Map<Integer, InstrumentationBreakpointInfo> lineNumbers = getLineNumbers(name, methods);
                         if (lineNumbers == null || lineNumbers.isEmpty()) {
                             return superMethodVisitor;
                         }
@@ -183,6 +183,15 @@ public class ConditionBreakpointTransformer {
         }
     }
 
+    private static Map<Integer, InstrumentationBreakpointInfo> getLineNumbers(String methodName, Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods) {
+        int index = methodName.indexOf("$lambda$");
+        if (index > 0) {
+            String whereMethodName = methodName.substring(0, index);
+            return methods.get(whereMethodName);
+        }
+        return methods.get(methodName);
+    }
+
     @SuppressWarnings("unused")
     public static void instrumentationException(Throwable e, int instrumentationId) {
         System.err.println("Instrumentation exception from id " + instrumentationId + ":");
@@ -199,6 +208,13 @@ public class ConditionBreakpointTransformer {
             return Integer.parseInt(fragmentClassName.substring(i + 1));
         }
         return -1; // Return -1 if no number is found
-
     }
+
+//
+//    List<String> lookAtClassNames(String loadingClassName) {
+//        if (loadingClassName.contains("$lambda$")) {
+//            return
+//        }
+//    }
+
 }
