@@ -17,12 +17,32 @@ public final class CaptureStorage {
   private static final ConcurrentIdentityWeakHashMap<Object, CapturedStack> STORAGE_GENERAL = new ConcurrentIdentityWeakHashMap<>();
   private static final ConcurrentIdentityWeakHashMap<Throwable, CapturedStack> STORAGE_THROWABLES = new ConcurrentIdentityWeakHashMap<>();
 
+  private static final ConcurrentIdentityWeakHashMap<Thread, Deque<CapturedStack>> THREAD_TO_STACKS_MAP = new ConcurrentIdentityWeakHashMap<>();
+
   private static final ThreadLocal<Deque<CapturedStack>> CURRENT_STACKS = new ThreadLocal<Deque<CapturedStack>>() {
     @Override
     protected Deque<CapturedStack> initialValue() {
       return new LinkedList<>();
     }
   };
+
+  private static final boolean storeAsyncStackTracesForAllThreads = Boolean.parseBoolean(
+          System.getProperty("debugger.async.stack.trace.for.all.threads", "false")
+  );
+
+  private static Deque<CapturedStack> getStacksForCurrentThread() {
+    if (storeAsyncStackTracesForAllThreads) {
+      Thread currentThread = Thread.currentThread();
+      Deque<CapturedStack> capturedStacks = THREAD_TO_STACKS_MAP.get(currentThread);
+      if (capturedStacks == null) {
+        capturedStacks = new LinkedList<>();
+        THREAD_TO_STACKS_MAP.put(currentThread, capturedStacks);
+      }
+      return capturedStacks;
+    } else {
+      return CURRENT_STACKS.get();
+    }
+  }
 
   private static final ThreadLocal<Boolean> THROWABLE_CAPTURE_DISABLED = new ThreadLocal<Boolean>() {
     @Override
@@ -52,7 +72,7 @@ public final class CaptureStorage {
           if (DEBUG) {
             System.out.println("captureGeneral " + getCallerDescriptorForLogging() + " - " + getKeyText(key));
           }
-          CapturedStack stack = CURRENT_STACKS.get().peekLast();
+          CapturedStack stack = getStacksForCurrentThread().peekLast();
           STORAGE_GENERAL.put(key, createCapturedStack(new Throwable(), stack));
         }
         // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
@@ -76,7 +96,7 @@ public final class CaptureStorage {
           if (DEBUG) {
             System.out.println("captureThrowable " + getCallerDescriptorForLogging() + " - " + getKeyText(throwable));
           }
-          CapturedStack stack = CURRENT_STACKS.get().peekLast();
+          CapturedStack stack = getStacksForCurrentThread().peekLast();
           if (stack != null) {
             // Ensure that we don't leak throwable here, IDEA-360126
             assert !(stack instanceof ExceptionCapturedStack) ||
@@ -102,7 +122,7 @@ public final class CaptureStorage {
       public void run() {
         try {
           CapturedStack stack = STORAGE_GENERAL.get(key);
-          Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
+          Deque<CapturedStack> currentStacks = getStacksForCurrentThread();
           currentStacks.add(stack);
           if (DEBUG) {
             System.out.println(
@@ -125,7 +145,7 @@ public final class CaptureStorage {
       @Override
       public void run() {
         try {
-          Deque<CapturedStack> currentStacks = CURRENT_STACKS.get();
+          Deque<CapturedStack> currentStacks = getStacksForCurrentThread();
           // frameworks may modify thread locals to avoid memory leaks, so do not fail if currentStacks is empty
           // check https://youtrack.jetbrains.com/issue/IDEA-357455 for more details
           currentStacks.pollLast();
@@ -383,9 +403,54 @@ public final class CaptureStorage {
   }
 
   // to be run from the debugger
+
+  /**
+   * Returns the captured stack trace of the current thread.
+   */
   @SuppressWarnings("unused")
   public static String getCurrentCapturedStack(int limit) throws IOException {
-    return wrapInString(CURRENT_STACKS.get().peekLast(), limit);
+    return wrapInString(getStacksForCurrentThread().peekLast(), limit);
+  }
+
+  /**
+   * If storing stack traces for all threads is enabled (`debugger.async.stack.trace.for.all.threads` is true),
+   * returns the captured stack trace of the given thread or null if no stack trace was captured.
+   *
+   * If `debugger.async.stack.trace.for.all.threads` is false,
+   * it only returns the captured stack trace for the current thread and null if no stack trace was captured or if the given thread is not the current thread.
+   */
+  @SuppressWarnings("unused")
+  public static String getCapturedStackForThread(int limit, Thread thread) throws IOException {
+    Deque<CapturedStack> capturedStacks = storeAsyncStackTracesForAllThreads
+            ? THREAD_TO_STACKS_MAP.get(thread)
+            : (thread == Thread.currentThread() ? CURRENT_STACKS.get() : null);
+    if (capturedStacks == null) return null;
+    return wrapInString(capturedStacks.peekLast(), limit);
+  }
+
+  /**
+   * If storing stack traces for all threads is enabled (`debugger.async.stack.trace.for.all.threads` is true),
+   * returns a map from thread to it's captured stack trace.
+   *
+   * If `debugger.async.stack.trace.for.all.threads` is false,
+   * only returns a map from the current thread to its captured stack trace.
+   */
+  public static Map<Thread, String> getAllCapturedStacks(int limit) throws IOException {
+    HashMap<Thread, String> threadToStacks = new HashMap<>();
+    if (storeAsyncStackTracesForAllThreads) {
+      for (Map.Entry<ConcurrentIdentityWeakHashMap.Key<Thread>, Deque<CapturedStack>> entry : THREAD_TO_STACKS_MAP.map.entrySet()) {
+        Thread thread = entry.getKey().get();
+        if (entry.getValue() == null || entry.getValue().isEmpty() || !thread.isAlive()) continue;
+        String capturedStack = wrapInString(entry.getValue().peekLast(), limit);
+        threadToStacks.put(thread, capturedStack);
+      }
+    } else {
+      Deque<CapturedStack> capturedStacks = CURRENT_STACKS.get();
+      if (capturedStacks != null) {
+        threadToStacks.put(Thread.currentThread(), wrapInString(capturedStacks.peekLast(), limit));
+      }
+    }
+    return threadToStacks;
   }
 
   // to be run from the debugger
