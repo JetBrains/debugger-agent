@@ -557,12 +557,20 @@ public final class CaptureAgent {
     addCapture("java/util/concurrent/CompletableFuture$AsyncRun", CONSTRUCTOR, THIS_KEY_PROVIDER);
     addInsert("java/util/concurrent/CompletableFuture$AsyncRun", "run", THIS_KEY_PROVIDER);
 
-    addCapture("java/util/concurrent/CompletableFuture$UniAccept", CONSTRUCTOR, THIS_KEY_PROVIDER);
-    addInsert("java/util/concurrent/CompletableFuture$UniAccept", "tryFire", THIS_KEY_PROVIDER);
+    // CompletableFuture instrumentation:
+    // handle every Completion subclass that invokes some callback (and not another future).
+    for (String completionClass : new String[]{
+            // Last updated for JDK 23.
+            "UniApply", "UniAccept", "UniRun",
+            "UniWhenComplete", "UniHandle", "UniExceptionally",
+            "UniComposeExceptionally", "UniCompose",
+            "BiApply", "BiAccept", "BiRun",
+            "OrApply", "OrAccept", "OrRun",
+    }) {
+      addCapture("java/util/concurrent/CompletableFuture$" + completionClass, CONSTRUCTOR, THIS_KEY_PROVIDER);
+      addInsert("java/util/concurrent/CompletableFuture$" + completionClass, "tryFire", THIS_KEY_PROVIDER);
+    }
 
-    addCapture("java/util/concurrent/CompletableFuture$UniRun", CONSTRUCTOR, THIS_KEY_PROVIDER);
-    addInsert("java/util/concurrent/CompletableFuture$UniRun", "tryFire", THIS_KEY_PROVIDER);
-    
     addCapture("java/util/concurrent/ForkJoinTask", "fork", THIS_KEY_PROVIDER);
     addInsert("java/util/concurrent/ForkJoinTask", "doExec", THIS_KEY_PROVIDER);
 
