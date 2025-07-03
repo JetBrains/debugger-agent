@@ -21,7 +21,15 @@ public class ClassTransformer {
     }
 
     public byte[] accept(ClassVisitor visitor, int parsingOptions, boolean storeClassForDebug) {
+        acceptOriginalByteCode(visitor, parsingOptions);
+        return produceModifiedCode(storeClassForDebug);
+    }
+
+    public void acceptOriginalByteCode(ClassVisitor visitor, int parsingOptions) {
         reader.accept(visitor, parsingOptions);
+    }
+
+    public byte[] produceModifiedCode(boolean storeClassForDebug) {
         byte[] bytes = writer.toByteArray();
         if (storeClassForDebug) {
             CaptureAgent.storeClassForDebug(className, bytes);
