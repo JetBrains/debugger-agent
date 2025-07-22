@@ -32,6 +32,7 @@ public class DebuggerAgent {
     SuspendHelper.init(properties);
     CollectionBreakpointInstrumentor.init(instrumentation);
     SpilledVariablesTransformer.init(instrumentation);
+    ConditionalBreakpointTransformer.init(properties, instrumentation);
   }
 
   private static void readAndApplyProperties(String uri, Instrumentation instrumentation) {
