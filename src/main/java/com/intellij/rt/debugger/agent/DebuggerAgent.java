@@ -34,11 +34,26 @@ public class DebuggerAgent {
     SpilledVariablesTransformer.init(instrumentation);
   }
 
-  private static void readAndApplyProperties(String uri, Instrumentation instrumentation) {
+  private static void readAndApplyProperties(String args, Instrumentation instrumentation) {
     Properties properties = new Properties();
+    if (args == null || args.isEmpty()) {
+      initAll(instrumentation, properties);
+      return;
+    }
+
+    // Parse arguments: uri|deleteSettings=false
+    String[] agentArgs = args.split("\\|", 2);
+    String uri = agentArgs[0].trim();
+    Boolean deleteSettingsArg = null;
+    if (agentArgs.length > 1) {
+      String secondArg = agentArgs[1].trim();
+      if (secondArg.startsWith("deleteSettings=")) {
+        deleteSettingsArg = Boolean.parseBoolean(secondArg.substring("deleteSettings=".length()).trim());
+      }
+    }
 
     File file = null;
-    if (uri != null && !uri.isEmpty()) {
+    if (!uri.isEmpty()) {
       try {
         InputStream stream = null;
         try {
@@ -60,7 +75,9 @@ public class DebuggerAgent {
     initAll(instrumentation, properties);
 
     // delete settings file only if it was read correctly
-    if (Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"))) {
+    boolean deleteSettings = deleteSettingsArg != null ? deleteSettingsArg
+            : Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"));
+    if (deleteSettings) {
       if (file != null) {
         //noinspection ResultOfMethodCallIgnored
         file.delete();
