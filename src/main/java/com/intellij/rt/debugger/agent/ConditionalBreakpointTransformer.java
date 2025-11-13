@@ -137,6 +137,11 @@ public class ConditionalBreakpointTransformer {
                                     Label catchBlock = new Label();
                                     Label afterIf = new Label();
 
+                                    String theTransformerClassName = getInternalClsName(ConditionalBreakpointTransformer.class);
+
+                                    mv.visitFieldInsn(Opcodes.GETSTATIC, theTransformerClassName, "isMutedState", "Z");
+                                    mv.visitJumpInsn(Opcodes.IFNE, afterIf);
+
                                     mv.visitTryCatchBlock(startTry, endTry, catchBlock, "java/lang/Throwable");
 
                                     mv.visitLabel(startTry);
@@ -172,7 +177,7 @@ public class ConditionalBreakpointTransformer {
                                     }
                                     mv.visitIntInsn(Opcodes.SIPUSH, instrumentationId);
                                     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
-                                            getInternalClsName(ConditionalBreakpointTransformer.class),
+                                            theTransformerClassName,
                                             "instrumentationException",
                                             "(Ljava/lang/Throwable;I)V",
                                             false);
@@ -204,6 +209,10 @@ public class ConditionalBreakpointTransformer {
         }
         return methods.get(methodName);
     }
+
+    /** This field is changing by the Debugger Engine side and used inside instrumented code */
+    @SuppressWarnings("unused")
+    public static boolean isMutedState = false;
 
     @SuppressWarnings("unused")
     public static void instrumentationFailed(Throwable e, int instrumentationId) {
