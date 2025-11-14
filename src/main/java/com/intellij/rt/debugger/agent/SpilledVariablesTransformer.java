@@ -1,9 +1,6 @@
 package com.intellij.rt.debugger.agent;
 
-import org.jetbrains.capture.org.objectweb.asm.ClassVisitor;
-import org.jetbrains.capture.org.objectweb.asm.ClassWriter;
-import org.jetbrains.capture.org.objectweb.asm.MethodVisitor;
-import org.jetbrains.capture.org.objectweb.asm.Opcodes;
+import org.jetbrains.capture.org.objectweb.asm.*;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
@@ -31,6 +28,8 @@ public class SpilledVariablesTransformer {
     }
 
     private static class SpillingTransformer implements ClassFileTransformer {
+        private static final String NULL_OUT_SPILLED_VARIABLE_DESC = "(Ljava/lang/Object;)Ljava/lang/Object;";
+
         @Override
         public byte[] transform(final ClassLoader loader, String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) {
             if (!"kotlin/coroutines/jvm/internal/SpillingKt".equals(className)) {
@@ -38,11 +37,15 @@ public class SpilledVariablesTransformer {
             }
             try {
                 ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
-                return transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
+                byte[] bytes = transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
                     @Override
                     public MethodVisitor visitMethod(int access, String name, String descriptor, String signature, String[] exceptions) {
                         MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
                         if (name.equals("nullOutSpilledVariable")) {
+                            if (!descriptor.equals(NULL_OUT_SPILLED_VARIABLE_DESC)) {
+                                System.err.println("SpilledVariablesTransformer: unexpected descriptor of SpillingKt#nullOutSpilledVariable " + descriptor);
+                                return superMethodVisitor;
+                            }
                             return new MethodVisitor(api, superMethodVisitor) {
                                 @Override
                                 public void visitCode() {
@@ -54,7 +57,11 @@ public class SpilledVariablesTransformer {
                         }
                         return superMethodVisitor;
                     }
-                }, 0, true);
+                }, 0, false);
+
+                CaptureAgent.storeClassForDebug(className, bytes);
+
+                return bytes;
             } catch (Exception e) {
                 System.out.println("SpillingTransformer: failed to instrument " + className);
                 e.printStackTrace();
