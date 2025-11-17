@@ -34,27 +34,32 @@ public class DebuggerAgent {
     SpilledVariablesTransformer.init(instrumentation);
   }
 
-  private static void readAndApplyProperties(String uri, Instrumentation instrumentation) {
+  private static void readAndApplyProperties(String path, Instrumentation instrumentation) {
     Properties properties = new Properties();
-
+    if (path == null || path.isEmpty()) {
+      initAll(instrumentation, properties);
+      return;
+    }
     File file = null;
-    if (uri != null && !uri.isEmpty()) {
-       try {
-         InputStream stream = null;
-         try {
-           file = new File(new URI(uri));
-           stream = new FileInputStream(file);
-           // use ISO 8859-1 character encoding
-           properties.load(stream);
-         } finally {
-           if (stream != null) {
-             stream.close();
-           }
-         }
-       } catch (Exception e) {
-         System.out.println("Capture agent: unable to read settings");
-         e.printStackTrace();
-       }
+    try {
+      InputStream stream = null;
+      try {
+        if (path.startsWith("file:")) {
+          file = new File(new URI(path));
+        } else {
+          file = new File(path);
+        }
+        stream = new FileInputStream(file);
+        // use ISO 8859-1 character encoding
+        properties.load(stream);
+      } finally {
+        if (stream != null) {
+          stream.close();
+        }
+      }
+    } catch (Exception e) {
+      System.out.println("Capture agent: unable to read settings");
+      e.printStackTrace();
     }
 
     initAll(instrumentation, properties);
