@@ -34,48 +34,35 @@ public class DebuggerAgent {
     SpilledVariablesTransformer.init(instrumentation);
   }
 
-  private static void readAndApplyProperties(String args, Instrumentation instrumentation) {
+  private static void readAndApplyProperties(String uri, Instrumentation instrumentation) {
     Properties properties = new Properties();
-    if (args == null || args.isEmpty()) {
-      initAll(instrumentation, properties);
-      return;
-    }
-
-    // Parse arguments: uri|deleteSettings=false
-    String[] agentArgs = args.split("\\|", 2);
-    String uri = agentArgs[0].trim();
-    Boolean deleteSettingsArg = null;
-    if (agentArgs.length > 1) {
-      String secondArg = agentArgs[1].trim();
-      if (secondArg.startsWith("deleteSettings=")) {
-        deleteSettingsArg = Boolean.parseBoolean(secondArg.substring("deleteSettings=".length()).trim());
-      }
-    }
 
     File file = null;
-    if (!uri.isEmpty()) {
-      try {
-        InputStream stream = null;
-        try {
-          file = new File(new URI(uri));
-          stream = new FileInputStream(file);
-          // use ISO 8859-1 character encoding
-          properties.load(stream);
-        } finally {
-          if (stream != null) {
-            stream.close();
-          }
-        }
-      } catch (Exception e) {
-        System.out.println("Capture agent: unable to read settings");
-        e.printStackTrace();
-      }
+    if (uri != null && !uri.isEmpty()) {
+       try {
+         InputStream stream = null;
+         try {
+           file = new File(new URI(uri));
+           stream = new FileInputStream(file);
+           // use ISO 8859-1 character encoding
+           properties.load(stream);
+         } finally {
+           if (stream != null) {
+             stream.close();
+           }
+         }
+       } catch (Exception e) {
+         System.out.println("Capture agent: unable to read settings");
+         e.printStackTrace();
+       }
     }
 
     initAll(instrumentation, properties);
 
     // delete settings file only if it was read correctly
-    boolean deleteSettings = deleteSettingsArg != null ? deleteSettingsArg
+    String deleteSettingsProperty = System.getProperty("debugger.agent.delete.settings", null);
+    boolean deleteSettings = deleteSettingsProperty != null
+            ? Boolean.parseBoolean(deleteSettingsProperty)
             : Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"));
     if (deleteSettings) {
       if (file != null) {
