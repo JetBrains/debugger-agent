@@ -10,6 +10,8 @@ import java.util.Properties;
 
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
 public class DebuggerAgent {
+  private static final String KEEP_SUFFIX = "[keep]";
+
   public static void premain(String args, Instrumentation instrumentation) {
     if (DebuggerAgent.class.getClassLoader() != null) {
       System.err.println("Debugger agent: agent should be loaded by bootstrap classloader, " +
@@ -34,12 +36,22 @@ public class DebuggerAgent {
     SpilledVariablesTransformer.init(instrumentation);
   }
 
-  private static void readAndApplyProperties(String path, Instrumentation instrumentation) {
+  private static void readAndApplyProperties(String args, Instrumentation instrumentation) {
     Properties properties = new Properties();
-    if (path == null || path.isEmpty()) {
+    if (args == null || args.isEmpty()) {
       initAll(instrumentation, properties);
       return;
     }
+    // Parse "keep setting file" suffix: -javaagent:<path>/debugger-agent.jar=<uri-or-path-to-props>([keep])?
+    String path;
+    Boolean keepSettings = null;
+    if (args.endsWith(KEEP_SUFFIX)) {
+        path = args.substring(0, args.length() - KEEP_SUFFIX.length());
+        keepSettings = true;
+    } else {
+        path = args;
+    }
+
     File file = null;
     try {
       InputStream stream = null;
@@ -65,11 +77,8 @@ public class DebuggerAgent {
     initAll(instrumentation, properties);
 
     // delete settings file only if it was read correctly
-    String deleteSettingsProperty = System.getProperty("debugger.agent.delete.settings", null);
-    boolean deleteSettings = deleteSettingsProperty != null
-            ? Boolean.parseBoolean(deleteSettingsProperty)
-            : Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"));
-    if (deleteSettings) {
+    boolean keep = keepSettings != null || !Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"));
+    if (!keep) {
       if (file != null) {
         //noinspection ResultOfMethodCallIgnored
         file.delete();
