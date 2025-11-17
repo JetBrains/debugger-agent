@@ -136,11 +136,17 @@ public class ConditionalBreakpointTransformer {
                                     Label endTry = new Label();
                                     Label catchBlock = new Label();
                                     Label afterIf = new Label();
+                                    Label checkIsDone = new Label();
 
                                     String theTransformerClassName = getInternalClsName(ConditionalBreakpointTransformer.class);
 
-                                    mv.visitFieldInsn(Opcodes.GETSTATIC, theTransformerClassName, "isMutedState", "Z");
-                                    mv.visitJumpInsn(Opcodes.IFNE, afterIf);
+                                    mv.visitMethodInsn(Opcodes.INVOKESTATIC,
+                                            theTransformerClassName,
+                                            "enterBreakpointCheck",
+                                            "()Z",
+                                            false);
+
+                                    mv.visitJumpInsn(Opcodes.IFNE, checkIsDone);
 
                                     mv.visitTryCatchBlock(startTry, endTry, catchBlock, "java/lang/Throwable");
 
@@ -183,6 +189,13 @@ public class ConditionalBreakpointTransformer {
                                             false);
 
                                     mv.visitLabel(afterIf);
+
+                                    mv.visitMethodInsn(Opcodes.INVOKESTATIC,
+                                            theTransformerClassName,
+                                            "checkIsDone",
+                                            "()V",
+                                            false);
+                                    mv.visitLabel(checkIsDone);
                                 } catch (Throwable e) {
                                     throw new InstrumentationBpExceptionWrapper(e, instrumentationId);
                                 }
@@ -208,6 +221,46 @@ public class ConditionalBreakpointTransformer {
             return methods.get(whereMethodName);
         }
         return methods.get(methodName);
+    }
+
+    private static final ThreadLocal<Integer> myThreadLocal = new ThreadLocal<>();
+
+    /**
+     * This method is used from the Debugger Engine side to check
+     * that the triggered breakpoint is not met under some evaluation
+     */
+    @SuppressWarnings("unused")
+    public static boolean isUnderBreakpointCheck() {
+        Integer previous = myThreadLocal.get();
+        if (previous == null) {
+            previous = 0;
+        }
+        return previous > 0;
+    }
+
+    /** This method is used from instrumented code */
+    @SuppressWarnings("unused")
+    public static boolean enterBreakpointCheck() {
+        Integer previous = myThreadLocal.get();
+        if (previous == null) {
+            previous = 0;
+        }
+        if (previous > 0) {
+            return true;
+        }
+        myThreadLocal.set(previous + 1);
+
+        return isMutedState;
+    }
+
+    /** This method is used from instrumented code */
+    @SuppressWarnings("unused")
+    public static void checkIsDone() {
+        Integer previous = myThreadLocal.get();
+        if (previous == null) {
+            previous = 0;
+        }
+        myThreadLocal.set(previous - 1);
     }
 
     /** This field is changing by the Debugger Engine side and used inside instrumented code */
