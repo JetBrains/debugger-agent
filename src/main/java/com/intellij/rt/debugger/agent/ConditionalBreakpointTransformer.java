@@ -1,9 +1,7 @@
 package com.intellij.rt.debugger.agent;
 
 import org.jetbrains.capture.org.objectweb.asm.*;
-import org.jetbrains.capture.org.objectweb.asm.tree.ClassNode;
-import org.jetbrains.capture.org.objectweb.asm.tree.LocalVariableNode;
-import org.jetbrains.capture.org.objectweb.asm.tree.MethodNode;
+import org.jetbrains.capture.org.objectweb.asm.tree.*;
 
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
@@ -32,6 +30,21 @@ class InstrumentationBreakpointInfo {
         this.fragmentClassName = fragmentClassName;
         this.methodSignature = methodSignature;
         this.argumentNames = argumentNames;
+    }
+}
+
+
+interface ArgumentGetter {
+    void generateArgumentLoad(MethodVisitor mv);
+}
+
+class InstrumentationBreakpointMappingInfo {
+    final InstrumentationBreakpointInfo inputInfo;
+    final List<ArgumentGetter> argumentLoadGenerators;
+
+    InstrumentationBreakpointMappingInfo(InstrumentationBreakpointInfo inputInfo, List<ArgumentGetter> argumentLoadGenerators) {
+        this.inputInfo = inputInfo;
+        this.argumentLoadGenerators = argumentLoadGenerators;
     }
 }
 
@@ -115,21 +128,26 @@ public class ConditionalBreakpointTransformer {
                         if (m == null) {
                             return superMethodVisitor;
                         }
-                        final MethodNode methodNode = m;
+
+                        final Map<Integer, InstrumentationBreakpointMappingInfo> argumentMapping = collectArgumentMapping(m, lineNumbers);
+
+                        if (argumentMapping.isEmpty()) {
+                            return superMethodVisitor;
+                        }
 
                         return new MethodVisitor(api, superMethodVisitor) {
 
                             @Override
                             public void visitLineNumber(int line, Label start) {
-                                InstrumentationBreakpointInfo instrumentationBreakpointInfo = lineNumbers.get(line);
+                                InstrumentationBreakpointMappingInfo instrumentationBreakpointInfo = argumentMapping.get(line);
                                 if (instrumentationBreakpointInfo != null) {
-                                    addInstrumentationCondition(instrumentationBreakpointInfo, start);
+                                    addInstrumentationCondition(instrumentationBreakpointInfo);
                                 }
                                 super.visitLineNumber(line, start);
                             }
 
-                            private void addInstrumentationCondition(InstrumentationBreakpointInfo instrumentationBreakpointInfo, Label start) {
-                                String fragmentClassName = instrumentationBreakpointInfo.fragmentClassName;
+                            private void addInstrumentationCondition(InstrumentationBreakpointMappingInfo argumentMapping) {
+                                String fragmentClassName = argumentMapping.inputInfo.fragmentClassName;
                                 int instrumentationId = extractIdFromFragmentClassName(fragmentClassName);
                                 try {
                                     Label startTry = new Label();
@@ -152,27 +170,14 @@ public class ConditionalBreakpointTransformer {
 
                                     mv.visitLabel(startTry);
 
-                                    for (String argumentName : instrumentationBreakpointInfo.argumentNames) {
-                                        if (argumentName.equals("this")/* || argumentName.startsWith("this$")*/) {
-                                            mv.visitVarInsn(Opcodes.ALOAD, 0);
-                                        }
-                                        else {
-                                            for (LocalVariableNode localVariable : methodNode.localVariables) {
-                                                if (localVariable.name.equals(argumentName) /*&&
-                                                start.getOffset() >= localVariable.start.getLabel().getOffset() &&
-                                                start.getOffset() < localVariable.end.getLabel().getOffset()*/) {
-                                                    Type type = Type.getType(localVariable.desc);
-                                                    mv.visitVarInsn(type.getOpcode(Opcodes.ILOAD), localVariable.index);
-                                                }
-                                            }
-                                        }
+                                    for (ArgumentGetter argumentLoadGenerator : argumentMapping.argumentLoadGenerators) {
+                                        argumentLoadGenerator.generateArgumentLoad(mv);
                                     }
-
 
                                     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
                                             fragmentClassName,
                                             conditionCheckMethodName,
-                                            instrumentationBreakpointInfo.methodSignature,
+                                            argumentMapping.inputInfo.methodSignature,
                                             false);
                                     mv.visitLabel(endTry);
                                     mv.visitJumpInsn(Opcodes.GOTO, afterIf);
@@ -212,6 +217,63 @@ public class ConditionalBreakpointTransformer {
             }
             return null;
         }
+    }
+
+    private static Map<Integer, InstrumentationBreakpointMappingInfo> collectArgumentMapping(MethodNode method, Map<Integer, InstrumentationBreakpointInfo> lineNumbers) {
+        final Map<Integer, InstrumentationBreakpointMappingInfo> remappingInfo = new HashMap<>();
+
+        Set<Integer> visitedLineNumbers = new HashSet<>();
+        for (int instructionIndex = 0; instructionIndex < method.instructions.size(); instructionIndex++) {
+            AbstractInsnNode instruction = method.instructions.get(instructionIndex);
+            if (!(instruction instanceof LineNumberNode)) {
+                continue;
+            }
+
+            int lineNumber = ((LineNumberNode)instruction).line;
+            InstrumentationBreakpointInfo instrumentationBreakpointInfo = lineNumbers.get(lineNumber);
+            if (instrumentationBreakpointInfo != null) {
+                // skip non-trivial cases for now
+                boolean isFirstTimeMetLineNumber = visitedLineNumbers.add(lineNumber);
+                if (!isFirstTimeMetLineNumber) {
+                    impossibleToInstrument("Several instructions marked with the same line " + lineNumber, extractIdFromFragmentClassName(instrumentationBreakpointInfo.fragmentClassName));
+                    remappingInfo.remove(lineNumber);
+                }
+                else {
+                    List<ArgumentGetter> argumentLoadGenerators = new ArrayList<>();
+                    for (String argumentName : instrumentationBreakpointInfo.argumentNames) {
+                        boolean isFound = false;
+                        for (LocalVariableNode localVariableNode : method.localVariables) {
+                            if (localVariableNode.name.equals(argumentName) &&
+                                    method.instructions.indexOf(localVariableNode.start) <= instructionIndex &&
+                                    instructionIndex < method.instructions.indexOf(localVariableNode.end)
+                            ) {
+                                isFound = true;
+
+                                final Type type = Type.getType(localVariableNode.desc);
+                                final int localVariableIndex = localVariableNode.index;
+                                argumentLoadGenerators.add(new ArgumentGetter() {
+                                    @Override
+                                    public void generateArgumentLoad(MethodVisitor mv) {
+                                        mv.visitVarInsn(type.getOpcode(Opcodes.ILOAD), localVariableIndex);
+                                    }
+                                });
+                                break;
+                            }
+                        }
+                        if (!isFound) {
+                            impossibleToInstrument("Argument " + argumentName  + " not found", extractIdFromFragmentClassName(instrumentationBreakpointInfo.fragmentClassName));
+                            break;
+                        }
+                    }
+
+                    if (argumentLoadGenerators.size() == instrumentationBreakpointInfo.argumentNames.size()) {
+                        remappingInfo.put(lineNumber, new InstrumentationBreakpointMappingInfo(instrumentationBreakpointInfo, argumentLoadGenerators));
+                    }
+                }
+            }
+        }
+
+        return remappingInfo;
     }
 
     private static Map<Integer, InstrumentationBreakpointInfo> getLineNumbers(String methodName, Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods) {
@@ -275,6 +337,11 @@ public class ConditionalBreakpointTransformer {
 
     @SuppressWarnings("unused")
     public static void instrumentationException(Throwable e, int instrumentationId) {
+        // The report will be on the IDE side by a special breakpoint
+    }
+
+    @SuppressWarnings("unused")
+    public static void impossibleToInstrument(String message, int instrumentationId) {
         // The report will be on the IDE side by a special breakpoint
     }
 
