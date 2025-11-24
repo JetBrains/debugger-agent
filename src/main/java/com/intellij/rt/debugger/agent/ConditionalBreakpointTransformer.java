@@ -300,9 +300,17 @@ public class ConditionalBreakpointTransformer {
         return previous > 0;
     }
 
-    /** This method is used from instrumented code */
+    /**
+     * This method is used from instrumented code
+     *
+     * @return true if the breakpoint condition should be skipped
+     */
     @SuppressWarnings("unused")
     public static boolean enterBreakpointCheck() {
+        if (!isUnmutedState) {
+            return true;
+        }
+
         Integer previous = myThreadLocal.get();
         if (previous == null) {
             previous = 0;
@@ -312,7 +320,7 @@ public class ConditionalBreakpointTransformer {
         }
         myThreadLocal.set(previous + 1);
 
-        return isMutedState;
+        return false;
     }
 
     /** This method is used from instrumented code */
@@ -325,9 +333,14 @@ public class ConditionalBreakpointTransformer {
         myThreadLocal.set(previous - 1);
     }
 
-    /** This field is changing by the Debugger Engine side and used inside instrumented code */
+    /**
+     * This field is changing by the Debugger Engine side and used inside instrumented code
+     * <p>
+     * Should not be initialized, so we can set it from Class Prepare Event from the Debugger Engine,
+     * and the `init` will not rewrite it
+     */
     @SuppressWarnings("unused")
-    public static boolean isMutedState = false;
+    public static boolean isUnmutedState;
 
     @SuppressWarnings("unused")
     public static void instrumentationFailed(Throwable e, int instrumentationId) {
