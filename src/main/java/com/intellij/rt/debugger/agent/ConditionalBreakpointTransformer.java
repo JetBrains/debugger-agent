@@ -3,6 +3,8 @@ package com.intellij.rt.debugger.agent;
 import org.jetbrains.capture.org.objectweb.asm.*;
 import org.jetbrains.capture.org.objectweb.asm.tree.*;
 
+import java.io.ByteArrayOutputStream;
+import java.io.PrintStream;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.security.ProtectionDomain;
@@ -183,14 +185,19 @@ public class ConditionalBreakpointTransformer {
                                     mv.visitJumpInsn(Opcodes.GOTO, afterIf);
 
                                     mv.visitLabel(catchBlock);
+                                    mv.visitMethodInsn(Opcodes.INVOKEVIRTUAL,
+                                            "java/lang/Throwable",
+                                            "toString",
+                                            "()Ljava/lang/String;",
+                                            false);
                                     if (instrumentationId >= Short.MAX_VALUE) {
                                         throw new IllegalArgumentException("Instrumentation ID exceeds short range: " + instrumentationId);
                                     }
                                     mv.visitIntInsn(Opcodes.SIPUSH, instrumentationId);
                                     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
                                             theTransformerClassName,
-                                            "instrumentationException",
-                                            "(Ljava/lang/Throwable;I)V",
+                                            "reportIncorrectInstrumentation",
+                                            "(Ljava/lang/String;I)V",
                                             false);
 
                                     mv.visitLabel(afterIf);
@@ -342,14 +349,38 @@ public class ConditionalBreakpointTransformer {
     @SuppressWarnings("unused")
     public static boolean isUnmutedState;
 
-    @SuppressWarnings("unused")
     public static void instrumentationFailed(Throwable e, int instrumentationId) {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+
+        PrintStream s = new PrintStream(baos);
+
+        s.println(e);
+
+        StackTraceElement[] trace = e.getStackTrace();
+        int lastToReportIndex = 0;
+        for (int i = 0; i < trace.length; i++) {
+            StackTraceElement traceElement = trace[i];
+            if (traceElement.getClassName().startsWith("com.intellij.rt.debugger.agent")) {
+                lastToReportIndex = i;
+            }
+        }
+        for (int i = 0; i <= lastToReportIndex; i++) {
+            StackTraceElement traceElement = trace[i];
+            s.println("\tat " + traceElement);
+        }
+
+        reportInstrumentationFailed(baos.toString(), instrumentationId);
+
+        s.close();
+    }
+
+    @SuppressWarnings("unused")
+    public static void reportInstrumentationFailed(String report, int instrumentationId) {
         // The report will be on the IDE side by a special breakpoint
     }
 
-
     @SuppressWarnings("unused")
-    public static void instrumentationException(Throwable e, int instrumentationId) {
+    public static void reportIncorrectInstrumentation(String report, int instrumentationId) {
         // The report will be on the IDE side by a special breakpoint
     }
 
