@@ -238,7 +238,10 @@ public class ConditionalBreakpointTransformer {
 
             int lineNumber = ((LineNumberNode)instruction).line;
             InstrumentationBreakpointInfo instrumentationBreakpointInfo = lineNumbers.get(lineNumber);
-            if (instrumentationBreakpointInfo != null) {
+            if (instrumentationBreakpointInfo == null) {
+                continue;
+            }
+            try {
                 // skip non-trivial cases for now
                 boolean isFirstTimeMetLineNumber = visitedLineNumbers.add(lineNumber);
                 if (!isFirstTimeMetLineNumber) {
@@ -277,6 +280,8 @@ public class ConditionalBreakpointTransformer {
                         remappingInfo.put(lineNumber, new InstrumentationBreakpointMappingInfo(instrumentationBreakpointInfo, argumentLoadGenerators));
                     }
                 }
+            } catch (Throwable e) {
+                throw new InstrumentationBpExceptionWrapper(e, extractIdFromFragmentClassName(instrumentationBreakpointInfo.fragmentClassName));
             }
         }
 
