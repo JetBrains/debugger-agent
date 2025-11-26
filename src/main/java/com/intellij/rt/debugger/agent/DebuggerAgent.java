@@ -45,11 +45,12 @@ public class DebuggerAgent {
     // Parse "keep setting file" suffix: -javaagent:<path>/debugger-agent.jar=<uri-or-path-to-props>([keep])?
     String path;
     Boolean keepSettings = null;
-    if (args.endsWith(KEEP_SUFFIX)) {
-        path = args.substring(0, args.length() - KEEP_SUFFIX.length());
-        keepSettings = true;
+    String argsTrimmed = args.trim();
+    if (argsTrimmed.endsWith(KEEP_SUFFIX)) {
+      path = argsTrimmed.substring(0, argsTrimmed.length() - KEEP_SUFFIX.length()).trim();
+      keepSettings = true;
     } else {
-        path = args;
+      path = argsTrimmed;
     }
 
     File file = null;
