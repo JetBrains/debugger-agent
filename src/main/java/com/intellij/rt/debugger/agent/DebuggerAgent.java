@@ -6,6 +6,8 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
 import java.util.Properties;
 
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
@@ -55,20 +57,14 @@ public class DebuggerAgent {
 
     File file = null;
     try {
-      InputStream stream = null;
       try {
-        if (path.startsWith("file:")) {
-          file = new File(new URI(path));
-        } else {
-          file = new File(path);
-        }
-        stream = new FileInputStream(file);
+        file = new File(new URI(path));
+      } catch (URISyntaxException ignored) {
+        file = new File(path);
+      }
+      try (InputStream stream = Files.newInputStream(file.toPath())) {
         // use ISO 8859-1 character encoding
         properties.load(stream);
-      } finally {
-        if (stream != null) {
-          stream.close();
-        }
       }
     } catch (Exception e) {
       System.out.println("Capture agent: unable to read settings");
