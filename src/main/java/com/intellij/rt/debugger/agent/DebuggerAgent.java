@@ -1,15 +1,20 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.rt.debugger.agent;
 
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.net.URI;
+import java.net.URISyntaxException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Properties;
 
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
 public class DebuggerAgent {
+  private static final String KEEP_SUFFIX = "[keep]";
+
   public static void premain(String args, Instrumentation instrumentation) {
     if (DebuggerAgent.class.getClassLoader() != null) {
       System.err.println("Debugger agent: agent should be loaded by bootstrap classloader, " +
@@ -35,36 +40,49 @@ public class DebuggerAgent {
     TailCallContinuationTransformer.init(instrumentation);
   }
 
-  private static void readAndApplyProperties(String uri, Instrumentation instrumentation) {
+  private static void readAndApplyProperties(String args, Instrumentation instrumentation) {
     Properties properties = new Properties();
+    if (args == null || args.isEmpty()) {
+      initAll(instrumentation, properties);
+      return;
+    }
+    // Parse "keep setting file" suffix: -javaagent:<path>/debugger-agent.jar=<uri-or-path-to-props>([keep])?
+    String path;
+    boolean keepSettings = false;
+    String argsTrimmed = args.trim();
+    if (argsTrimmed.endsWith(KEEP_SUFFIX)) {
+      path = argsTrimmed.substring(0, argsTrimmed.length() - KEEP_SUFFIX.length()).trim();
+      keepSettings = true;
+    } else {
+      path = argsTrimmed;
+    }
 
-    File file = null;
-    if (uri != null && !uri.isEmpty()) {
+    Path filePath = null;
+    try {
       try {
-        InputStream stream = null;
-        try {
-          file = new File(new URI(uri));
-          stream = new FileInputStream(file);
-          // use ISO 8859-1 character encoding
-          properties.load(stream);
-        } finally {
-          if (stream != null) {
-            stream.close();
-          }
-        }
-      } catch (Exception e) {
-        System.out.println("Capture agent: unable to read settings");
-        e.printStackTrace();
+        filePath = Paths.get(new URI(path));
+      } catch (URISyntaxException ignored) {
+        filePath = Paths.get(path);
       }
+      try (InputStream stream = Files.newInputStream(filePath)) {
+        // use ISO 8859-1 character encoding
+        properties.load(stream);
+      }
+    } catch (Exception e) {
+      System.out.println("Capture agent: unable to read settings");
+      e.printStackTrace();
     }
 
     initAll(instrumentation, properties);
 
     // delete settings file only if it was read correctly
-    if (Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"))) {
-      if (file != null) {
-        //noinspection ResultOfMethodCallIgnored
-        file.delete();
+    boolean keep = keepSettings || !Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"));
+    if (!keep && filePath != null) {
+      try {
+        Files.deleteIfExists(filePath);
+      } catch (IOException e) {
+        System.out.println("Capture agent: could not delete settings file: " + filePath);
+        e.printStackTrace();
       }
     }
   }
