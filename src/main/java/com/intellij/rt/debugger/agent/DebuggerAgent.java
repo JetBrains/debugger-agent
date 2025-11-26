@@ -44,7 +44,7 @@ public class DebuggerAgent {
     }
     // Parse "keep setting file" suffix: -javaagent:<path>/debugger-agent.jar=<uri-or-path-to-props>([keep])?
     String path;
-    Boolean keepSettings = null;
+    boolean keepSettings = false;
     String argsTrimmed = args.trim();
     if (argsTrimmed.endsWith(KEEP_SUFFIX)) {
       path = argsTrimmed.substring(0, argsTrimmed.length() - KEEP_SUFFIX.length()).trim();
@@ -78,7 +78,7 @@ public class DebuggerAgent {
     initAll(instrumentation, properties);
 
     // delete settings file only if it was read correctly
-    boolean keep = keepSettings != null || !Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"));
+    boolean keep = keepSettings || !Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"));
     if (!keep) {
       if (file != null) {
         //noinspection ResultOfMethodCallIgnored
