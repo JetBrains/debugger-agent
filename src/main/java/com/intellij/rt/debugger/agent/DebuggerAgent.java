@@ -1,13 +1,14 @@
 // Copyright 2000-2022 JetBrains s.r.o. and contributors. Use of this source code is governed by the Apache 2.0 license.
 package com.intellij.rt.debugger.agent;
 
-import java.io.File;
-import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.lang.instrument.Instrumentation;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Properties;
 
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
@@ -55,14 +56,14 @@ public class DebuggerAgent {
       path = argsTrimmed;
     }
 
-    File file = null;
+    Path filePath = null;
     try {
       try {
-        file = new File(new URI(path));
+        filePath = Paths.get(new URI(path));
       } catch (URISyntaxException ignored) {
-        file = new File(path);
+        filePath = Paths.get(path);
       }
-      try (InputStream stream = Files.newInputStream(file.toPath())) {
+      try (InputStream stream = Files.newInputStream(filePath)) {
         // use ISO 8859-1 character encoding
         properties.load(stream);
       }
@@ -75,10 +76,12 @@ public class DebuggerAgent {
 
     // delete settings file only if it was read correctly
     boolean keep = keepSettings || !Boolean.parseBoolean(properties.getProperty("deleteSettings", "true"));
-    if (!keep) {
-      if (file != null) {
-        //noinspection ResultOfMethodCallIgnored
-        file.delete();
+    if (!keep && filePath != null) {
+      try {
+        Files.deleteIfExists(filePath);
+      } catch (IOException e) {
+        System.out.println("Capture agent: could not delete settings file: " + filePath);
+        e.printStackTrace();
       }
     }
   }
