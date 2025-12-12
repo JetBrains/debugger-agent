@@ -30,7 +30,7 @@ public class TailCallContinuationTransformer {
                 return classfileBuffer;
             }
             try {
-                ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS, loader);
+                ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
                 final boolean[] wrapContinuationRealIsPresent = { false };
                 byte[] bytes = transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
                     @Override

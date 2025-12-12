@@ -5,6 +5,7 @@ package com.intellij.rt.debugger.agent;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -86,10 +87,8 @@ public class CollectionBreakpointStorage {
     if (info == null) {
       return "";
     }
-    ByteArrayOutputStream bas = new ByteArrayOutputStream();
-    DataOutputStream dos = null;
-    try {
-      dos = new DataOutputStream(bas);
+    try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
+         DataOutputStream dos = new DataOutputStream(bas)) {
       for (StackTraceElement stackTraceElement : info.getStackTrace()) {
         if (stackTraceElement != null) {
           dos.writeUTF(stackTraceElement.getClassName());
@@ -97,12 +96,7 @@ public class CollectionBreakpointStorage {
           dos.writeInt(stackTraceElement.getLineNumber());
         }
       }
-      return bas.toString("ISO-8859-1");
-    }
-    finally {
-      if (dos != null) {
-        dos.close();
-      }
+      return bas.toString(StandardCharsets.ISO_8859_1.name());
     }
   }
 
