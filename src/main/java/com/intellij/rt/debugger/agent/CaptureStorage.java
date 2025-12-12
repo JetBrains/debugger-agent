@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -55,7 +56,7 @@ public final class CaptureStorage {
   public static boolean DEBUG; // set from debugger
   private static boolean ENABLED = true;
 
-  private static final StackTraceElement ASYNC_STACK_ELEMENT =
+  static final StackTraceElement ASYNC_STACK_ELEMENT =
           new StackTraceElement("--- Async", "Stack.Trace --- ", "captured by IntelliJ IDEA debugger", -1);
 
   //// METHODS CALLED FROM THE USER PROCESS
@@ -402,15 +403,16 @@ public final class CaptureStorage {
     }
   }
 
-  // to be run from the debugger
-
   /**
    * Returns the captured stack trace of the current thread.
    */
-  @SuppressWarnings("unused")
-  public static String getCurrentCapturedStack(int limit) throws IOException {
-    return wrapInString(getStacksForCurrentThread().peekLast(), limit);
+  static List<StackTraceElement> getCurrentCapturedStack(int limit) {
+    CapturedStack stack = getStacksForCurrentThread().peekLast();
+    if (stack == null) return null;
+    return getStackTrace(stack, limit);
   }
+
+  // to be run from the debugger
 
   /**
    * If storing stack traces for all threads is enabled (`debugger.async.stack.trace.for.all.threads` is true),
@@ -420,7 +422,7 @@ public final class CaptureStorage {
    * it only returns the captured stack trace for the current thread and null if no stack trace was captured or if the given thread is not the current thread.
    */
   @SuppressWarnings("unused")
-  public static String getCapturedStackForThread(int limit, Thread thread) throws IOException {
+  public static String getCapturedStackForThread(int limit, Thread thread) {
     Deque<CapturedStack> capturedStacks = storeAsyncStackTracesForAllThreads
             ? THREAD_TO_STACKS_MAP.get(thread)
             : (thread == Thread.currentThread() ? CURRENT_STACKS.get() : null);
@@ -435,7 +437,7 @@ public final class CaptureStorage {
    * If `debugger.async.stack.trace.for.all.threads` is false,
    * only returns a map from the current thread to its captured stack trace.
    */
-  public static Map<Thread, String> getAllCapturedStacks(int limit) throws IOException {
+  public static Map<Thread, String> getAllCapturedStacks(int limit) {
     HashMap<Thread, String> threadToStacks = new HashMap<>();
     if (storeAsyncStackTracesForAllThreads) {
       for (Map.Entry<ConcurrentIdentityWeakHashMap.Key<Thread>, Deque<CapturedStack>> entry : THREAD_TO_STACKS_MAP.map.entrySet()) {
@@ -459,24 +461,44 @@ public final class CaptureStorage {
       return wrapInArray(STORAGE_GENERAL.get(key), limit);
   }
 
-  private static String wrapInString(CapturedStack stack, int limit) throws IOException {
+  private static String wrapInString(CapturedStack stack, int limit) {
     if (stack == null) {
       return null;
     }
-    ByteArrayOutputStream bas = new ByteArrayOutputStream();
-    DataOutputStream dos = new DataOutputStream(bas);
-    for (StackTraceElement elem : getStackTrace(stack, limit)) {
-      if (elem == ASYNC_STACK_ELEMENT) {
-        dos.writeBoolean(false);
-      }
-      else {
-        dos.writeBoolean(true);
-        dos.writeUTF(elem.getClassName());
-        dos.writeUTF(elem.getMethodName());
-        dos.writeInt(elem.getLineNumber());
-      }
+    return wrapAsyncStackTraceInString(getStackTrace(stack, limit));
+  }
+
+  private static String wrapAsyncStackTraceInString(List<StackTraceElement> stackTrace) {
+    if (stackTrace == null || stackTrace.isEmpty()) {
+      return null;
     }
-    return bas.toString("ISO-8859-1");
+    try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
+         DataOutputStream dos = new DataOutputStream(bas)) {
+      writeAsyncStackTraceToStream(stackTrace, dos);
+      return bas.toString(StandardCharsets.ISO_8859_1.name());
+    } catch (IOException e) {
+      // It shouldn't ever happen.
+      handleException(e);
+      return null;
+    }
+  }
+
+  static void writeAsyncStackTraceToStream(List<StackTraceElement> stackTrace, DataOutputStream dos) throws IOException {
+    for (StackTraceElement elem : stackTrace) {
+      writeAsyncStackTraceElementToStream(elem, dos);
+    }
+  }
+
+  static void writeAsyncStackTraceElementToStream(StackTraceElement elem, DataOutputStream dos) throws IOException {
+    if (elem == ASYNC_STACK_ELEMENT) {
+      dos.writeBoolean(false);
+    }
+    else {
+      dos.writeBoolean(true);
+      dos.writeUTF(elem.getClassName());
+      dos.writeUTF(elem.getMethodName());
+      dos.writeInt(elem.getLineNumber());
+    }
   }
 
   private static Object[][] wrapInArray(CapturedStack stack, int limit) {

@@ -38,6 +38,7 @@ public class DebuggerAgent {
     CollectionBreakpointInstrumentor.init(instrumentation);
     SpilledVariablesTransformer.init(instrumentation);
     TailCallContinuationTransformer.init(instrumentation);
+    LogCaptureTransformer.init(instrumentation);
   }
 
   private static void readAndApplyProperties(String args, Instrumentation instrumentation) {
