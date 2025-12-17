@@ -22,12 +22,14 @@ class InstrumentationBpExceptionWrapper extends RuntimeException {
 }
 
 class InstrumentationBreakpointInfo {
-    final Integer lineNumber;
+    final int instrumentationId;
+    final int lineNumber;
     final String fragmentClassName;
     final String methodSignature;
     final List<String> argumentNames;
 
-    InstrumentationBreakpointInfo(Integer lineNumber, String fragmentClassName, String methodSignature, List<String> argumentNames) {
+    InstrumentationBreakpointInfo(int instrumentationId, int lineNumber, String fragmentClassName, String methodSignature, List<String> argumentNames) {
+        this.instrumentationId = instrumentationId;
         this.lineNumber = lineNumber;
         this.fragmentClassName = fragmentClassName;
         this.methodSignature = methodSignature;
@@ -53,7 +55,7 @@ class InstrumentationBreakpointMappingInfo {
 public class ConditionalBreakpointTransformer {
     private static final String conditionCheckMethodName = "conditionCheck";
 
-    private static final Map<String, Map<String, Map<Integer, InstrumentationBreakpointInfo>>> myBreakpoints = new LinkedHashMap<>();
+    private static final Set<String> myClassesWithBreakpoints = new LinkedHashSet<>();
 
     public static void init(Properties properties, Instrumentation instrumentation) {
         applyProperties(properties);
@@ -67,50 +69,65 @@ public class ConditionalBreakpointTransformer {
     }
 
     private static void addPoint(String propertyKey, String propertyValue) {
-        if (propertyKey.startsWith("instrumentation.condition.breakpoint")) {
-            String[] split = propertyValue.split(" ");
-            if (split.length >= 4) {
-                addBreakpoint(Arrays.asList(split));
-            }
+        if (propertyKey.startsWith("instrumentation.breakpoint.class")) {
+            addBreakpointClass(propertyValue);
         }
     }
 
-    public static void addBreakpoint(List<String> split) {
-        String className = split.get(0);
-        String methodName = split.get(1);
-        int lineNumber = Integer.parseInt(split.get(2));
-        String fragmentClassName = split.get(3);
-        String methodSignature = split.get(4);
-        List<String> argumentNames = split.subList(5, split.size());
-
-        Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods = myBreakpoints.get(className);
-        if (methods == null) {
-            methods = new LinkedHashMap<>();
-            myBreakpoints.put(className, methods);
-        }
-        Map<Integer, InstrumentationBreakpointInfo> lineNumbers = getLineNumbers(methodName, methods);
-        if (lineNumbers == null) {
-            lineNumbers = new LinkedHashMap<>();
-            methods.put(methodName, lineNumbers);
-        }
-        lineNumbers.put(lineNumber, new InstrumentationBreakpointInfo(lineNumber, fragmentClassName, methodSignature, argumentNames));
+    public static void addBreakpointClass(String className) {
+        myClassesWithBreakpoints.add(className);
     }
 
     private static class BreakpointInstrumentalist implements ClassFileTransformer {
         @Override
         public byte[] transform(final ClassLoader loader, final String className, Class<?> classBeingRedefined, ProtectionDomain protectionDomain, byte[] classfileBuffer) {
-            final Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods = myBreakpoints.get(className);
-            if (methods == null || methods.isEmpty()) {
+            if (!myClassesWithBreakpoints.contains(className)) {
                 return null;
             }
 
+            final List<Integer> successIds = new ArrayList<>();
+
             try {
+                String[] megaInfo = requestInstrumentedInfo(className);
+                if (megaInfo.length == 0) {
+                    return null;
+                }
+
+                final Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods = new LinkedHashMap<>();
+                for (String info : megaInfo) {
+                    List<String> split = Arrays.asList(info.split(" "));
+                    String className2 = split.get(0);
+                    if (!className2.equals(className)) {
+                        // TODO: ERROR here
+                        continue;
+                    }
+                    String methodName = split.get(1);
+                    int lineNumber = Integer.parseInt(split.get(2));
+                    String fragmentClassName = split.get(3);
+                    String methodSignature = split.get(4);
+                    List<String> argumentNames = split.subList(5, split.size());
+
+                    Map<Integer, InstrumentationBreakpointInfo> lineNumbers = getLineNumbers(methodName, methods);
+                    if (lineNumbers == null) {
+                        lineNumbers = new LinkedHashMap<>();
+                        methods.put(methodName, lineNumbers);
+                    }
+
+                    int instrumentationId = extractIdFromFragmentClassName(fragmentClassName);
+                    lineNumbers.put(lineNumber, new InstrumentationBreakpointInfo(instrumentationId, lineNumber, fragmentClassName, methodSignature, argumentNames));
+                }
+
+                if (methods.isEmpty()) {
+                    return null;
+                }
+
                 final ClassNode classNode = new ClassNode();
                 new ClassReader(classfileBuffer).accept(classNode, 0);
 
                 ClassTransformer transformer = new ClassTransformer(
                         className, classfileBuffer, ClassWriter.COMPUTE_FRAMES | ClassWriter.COMPUTE_MAXS, loader
                 );
+
 
                 return transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
                     @Override
@@ -150,7 +167,10 @@ public class ConditionalBreakpointTransformer {
 
                             private void addInstrumentationCondition(InstrumentationBreakpointMappingInfo argumentMapping) {
                                 String fragmentClassName = argumentMapping.inputInfo.fragmentClassName;
-                                int instrumentationId = extractIdFromFragmentClassName(fragmentClassName);
+                                int instrumentationId = argumentMapping.inputInfo.instrumentationId;
+
+                                successIds.add(instrumentationId);
+
                                 try {
                                     Label startTry = new Label();
                                     Label endTry = new Label();
@@ -221,6 +241,15 @@ public class ConditionalBreakpointTransformer {
                 } else {
                     instrumentationFailed(e, -1);
                 }
+            } finally {
+                Integer[] integerArray = successIds.toArray(new Integer[0]);
+
+                int[] intArray = new int[integerArray.length];
+                for (int i = 0; i < integerArray.length; i++) {
+                    intArray[i] = integerArray[i];
+                }
+
+                successfullyInstrumented(loader, intArray);
             }
             return null;
         }
@@ -245,7 +274,7 @@ public class ConditionalBreakpointTransformer {
                 // skip non-trivial cases for now
                 boolean isFirstTimeMetLineNumber = visitedLineNumbers.add(lineNumber);
                 if (!isFirstTimeMetLineNumber) {
-                    impossibleToInstrument("Several instructions marked with the same line " + lineNumber, extractIdFromFragmentClassName(instrumentationBreakpointInfo.fragmentClassName));
+                    impossibleToInstrument("Several instructions marked with the same line " + lineNumber, instrumentationBreakpointInfo.instrumentationId);
                     remappingInfo.remove(lineNumber);
                 }
                 else {
@@ -271,7 +300,7 @@ public class ConditionalBreakpointTransformer {
                             }
                         }
                         if (!isFound) {
-                            impossibleToInstrument("Argument " + argumentName  + " not found", extractIdFromFragmentClassName(instrumentationBreakpointInfo.fragmentClassName));
+                            impossibleToInstrument("Argument " + argumentName  + " not found", instrumentationBreakpointInfo.instrumentationId);
                             break;
                         }
                     }
@@ -281,7 +310,7 @@ public class ConditionalBreakpointTransformer {
                     }
                 }
             } catch (Throwable e) {
-                throw new InstrumentationBpExceptionWrapper(e, extractIdFromFragmentClassName(instrumentationBreakpointInfo.fragmentClassName));
+                throw new InstrumentationBpExceptionWrapper(e, instrumentationBreakpointInfo.instrumentationId);
             }
         }
 
@@ -377,6 +406,15 @@ public class ConditionalBreakpointTransformer {
         reportInstrumentationFailed(baos.toString(), instrumentationId);
 
         s.close();
+    }
+
+    public static String[] requestInstrumentedInfo(@SuppressWarnings("unused") String className) {
+        return new String[0];
+    }
+
+    @SuppressWarnings("unused")
+    public static void successfullyInstrumented(ClassLoader loader, int[] instrumentationIds) {
+        // The report will be on the IDE side by a special breakpoint
     }
 
     @SuppressWarnings("unused")
