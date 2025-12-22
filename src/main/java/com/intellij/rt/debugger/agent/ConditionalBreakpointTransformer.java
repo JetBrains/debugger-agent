@@ -53,7 +53,7 @@ class InstrumentationBreakpointMappingInfo {
 }
 
 public class ConditionalBreakpointTransformer {
-    private static final String conditionCheckMethodName = "conditionCheck";
+    private static final String conditionCheckMethodName = "fragmentEntry";
 
     private static final Set<String> myClassesWithBreakpoints = new LinkedHashSet<>();
 
