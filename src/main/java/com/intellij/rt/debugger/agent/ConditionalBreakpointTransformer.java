@@ -25,13 +25,15 @@ class InstrumentationBreakpointInfo {
     final int instrumentationId;
     final int lineNumber;
     final String fragmentClassName;
+    final String fragmentEntryMethodName;
     final String methodSignature;
     final List<String> argumentNames;
 
-    InstrumentationBreakpointInfo(int instrumentationId, int lineNumber, String fragmentClassName, String methodSignature, List<String> argumentNames) {
+    InstrumentationBreakpointInfo(int instrumentationId, int lineNumber, String fragmentClassName, String fragmentEntryMethodName, String methodSignature, List<String> argumentNames) {
         this.instrumentationId = instrumentationId;
         this.lineNumber = lineNumber;
         this.fragmentClassName = fragmentClassName;
+        this.fragmentEntryMethodName = fragmentEntryMethodName;
         this.methodSignature = methodSignature;
         this.argumentNames = argumentNames;
     }
@@ -53,8 +55,6 @@ class InstrumentationBreakpointMappingInfo {
 }
 
 public class ConditionalBreakpointTransformer {
-    private static final String conditionCheckMethodName = "fragmentEntry";
-
     private static final Set<String> myClassesWithBreakpoints = new LinkedHashSet<>();
 
     public static void init(Properties properties, Instrumentation instrumentation) {
@@ -104,8 +104,9 @@ public class ConditionalBreakpointTransformer {
                     String methodName = split.get(1);
                     int lineNumber = Integer.parseInt(split.get(2));
                     String fragmentClassName = split.get(3);
-                    String methodSignature = split.get(4);
-                    List<String> argumentNames = split.subList(5, split.size());
+                    String fragmentEntryMethodName = split.get(4);
+                    String methodSignature = split.get(5);
+                    List<String> argumentNames = split.subList(6, split.size());
 
                     Map<Integer, InstrumentationBreakpointInfo> lineNumbers = getLineNumbers(methodName, methods);
                     if (lineNumbers == null) {
@@ -114,7 +115,7 @@ public class ConditionalBreakpointTransformer {
                     }
 
                     int instrumentationId = extractIdFromFragmentClassName(fragmentClassName);
-                    lineNumbers.put(lineNumber, new InstrumentationBreakpointInfo(instrumentationId, lineNumber, fragmentClassName, methodSignature, argumentNames));
+                    lineNumbers.put(lineNumber, new InstrumentationBreakpointInfo(instrumentationId, lineNumber, fragmentClassName, fragmentEntryMethodName, methodSignature, argumentNames));
                 }
 
                 if (methods.isEmpty()) {
@@ -167,6 +168,7 @@ public class ConditionalBreakpointTransformer {
 
                             private void addInstrumentationCondition(InstrumentationBreakpointMappingInfo argumentMapping) {
                                 String fragmentClassName = argumentMapping.inputInfo.fragmentClassName;
+                                String fragmentEntryMethodName = argumentMapping.inputInfo.fragmentEntryMethodName;
                                 int instrumentationId = argumentMapping.inputInfo.instrumentationId;
 
                                 successIds.add(instrumentationId);
@@ -198,7 +200,7 @@ public class ConditionalBreakpointTransformer {
 
                                     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
                                             fragmentClassName,
-                                            conditionCheckMethodName,
+                                            fragmentEntryMethodName,
                                             argumentMapping.inputInfo.methodSignature,
                                             false);
                                     mv.visitLabel(endTry);
