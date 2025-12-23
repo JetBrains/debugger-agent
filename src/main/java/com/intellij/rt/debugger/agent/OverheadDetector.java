@@ -1,0 +1,152 @@
+package com.intellij.rt.debugger.agent;
+
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.locks.LockSupport;
+
+/**
+ * This class is responsible for detecting and managing system overhead while executing tasks.
+ * It monitors and tracks task execution times and determines if the system is under significant overhead.
+ * It prevents tasks from executing if overhead thresholds are surpassed and throttling is enabled.
+ */
+// DO NOT CHANGE SIGNATURE: used from debugger
+public class OverheadDetector {
+    // DO NOT CHANGE SIGNATURE: set from debugger
+    volatile boolean throttleWhenOverhead = false;
+    private final AtomicBoolean myFirstOverheadDetected = new AtomicBoolean(false);
+
+    private final ThreadLocal<PerThread> myThreadLocal = new ThreadLocal<PerThread>() {
+        @Override
+        protected PerThread initialValue() {
+            return new PerThread();
+        }
+    };
+
+    /**
+     * Runs the provided runnable if there is no overhead detected or throttling is disabled.
+     * The execution of the runnable is not guaranteed.
+     */
+    public void runIfNoOverhead(Runnable runnable) {
+        myThreadLocal.get().runIfNoOverhead(runnable);
+    }
+
+    void onOverheadDetected() {
+        if (!myFirstOverheadDetected.compareAndSet(false, true)) return;
+        if (CaptureStorage.DEBUG) {
+            System.out.println("Overhead detected");
+        }
+        overheadDetected(this);
+    }
+
+    // DO NOT CHANGE SIGNATURE: debugger sets a breakpoint here
+    @SuppressWarnings("unused")
+    private void overheadDetected(OverheadDetector overheadDetector) {
+        // IDEA should install a breakpoint here and set throttleWhenOverhead field
+        // or disable agent completely
+    }
+
+    /**
+     * This timer is used to decrease the number of calls to System.nanoTime().
+     * It updates the time every precisionNs nanoseconds.
+     */
+    private static class CoarseTimer {
+        private volatile long myTimeNs = System.nanoTime();
+
+        CoarseTimer(final long precisionNs) {
+            Thread thread = new Thread(new Runnable() {
+
+                @Override
+                public void run() {
+                    while (true) {
+                        LockSupport.parkNanos(precisionNs);
+                        myTimeNs = System.nanoTime();
+                    }
+                }
+            }, "CoarseTimer");
+            thread.setDaemon(true);
+            thread.start();
+        }
+
+        public long nanoTime() {
+            return myTimeNs;
+        }
+    }
+
+    private static final long PERIOD_NS = TimeUnit.MILLISECONDS.toNanos(1024);
+    private static final long MAX_OVERHEAD_NS = TimeUnit.MILLISECONDS.toNanos(10);
+    private static final CoarseTimer ourTimer = new CoarseTimer(TimeUnit.MICROSECONDS.toNanos(10));
+
+    /**
+     * During a single period ({@link #PERIOD_NS}) of time, the overhead is limited to {@link #MAX_OVERHEAD_NS}.
+     */
+    private class PerThread {
+        private long myLastExecutionTime = ourTimer.nanoTime();
+        private long myOverhead = 0;
+        private boolean myInProgress = false;
+        private boolean myLocalThrottleWhenOverhead = throttleWhenOverhead;
+        private boolean myLocalFirstOverheadDetected = myFirstOverheadDetected.get();
+
+        public void runIfNoOverhead(Runnable runnable) {
+            // do nothing in recursive calls
+            if (myInProgress) {
+                runnable.run();
+                return;
+            }
+
+            long startTime = ourTimer.nanoTime();
+            restore(startTime);
+
+            if (overheadDetected()) {
+                notifyOverheadDetected();
+                if (isThrottlingEnabled()) {
+                    return;
+                }
+            }
+
+            myInProgress = true;
+            try {
+                runnable.run();
+            } finally {
+                // use real time here, as this is a slow path when no overhead detected
+                long endTime = System.nanoTime();
+                long elapsedTime = endTime - startTime;
+                // limit maximum to avoid one-time spikes that hard to restore from
+                // can overflow a little, but restores in 2 full periods
+                myOverhead = Math.min(2 * MAX_OVERHEAD_NS, myOverhead + elapsedTime);
+                myInProgress = false;
+            }
+        }
+
+        private boolean overheadDetected() {
+            return myOverhead >= MAX_OVERHEAD_NS;
+        }
+
+        private void notifyOverheadDetected() {
+            // notify only for the first time
+            if (myLocalFirstOverheadDetected) return;
+            myLocalFirstOverheadDetected = true;
+            onOverheadDetected();
+        }
+
+        private boolean isThrottlingEnabled() {
+            if (myLocalThrottleWhenOverhead) return true;
+
+            boolean enabled = throttleWhenOverhead;
+            if (enabled) {
+                myLocalThrottleWhenOverhead = true;
+            }
+            return enabled;
+        }
+
+        /**
+         * Restores the permitted overhead capacity proportionally to the time passed since the last execution.
+         */
+        private void restore(long currentTime) {
+            long passedTime = currentTime - myLastExecutionTime;
+            long restored = MAX_OVERHEAD_NS * passedTime / PERIOD_NS;
+
+            myLastExecutionTime = currentTime;
+            myOverhead = Math.max(0, myOverhead - restored);
+        }
+    }
+}
