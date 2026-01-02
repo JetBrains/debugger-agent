@@ -22,6 +22,13 @@ public class OverheadDetector {
         }
     };
 
+    private static final long PERIOD_NS = TimeUnit.MILLISECONDS.toNanos(1024);
+    private final long MAX_OVERHEAD_NS;
+
+    public OverheadDetector(double targetOverheadPercent) {
+        MAX_OVERHEAD_NS = Math.round(targetOverheadPercent * PERIOD_NS / 100);
+    }
+
     /**
      * Runs the provided runnable if there is no overhead detected or throttling is disabled.
      * The execution of the runnable is not guaranteed.
@@ -72,8 +79,10 @@ public class OverheadDetector {
         }
     }
 
-    private static final long PERIOD_NS = TimeUnit.MILLISECONDS.toNanos(1024);
-    private static final long MAX_OVERHEAD_NS = TimeUnit.MILLISECONDS.toNanos(10);
+    // While set to be 10 microseconds, it could be much more on different systems:
+    // 50-60 us on linux
+    // 10-50 us on macOS
+    // 1000+ us on Windows
     private static final CoarseTimer ourTimer = new CoarseTimer(TimeUnit.MICROSECONDS.toNanos(10));
 
     /**
@@ -107,8 +116,7 @@ public class OverheadDetector {
             try {
                 runnable.run();
             } finally {
-                // use real time here, as this is a slow path when no overhead detected
-                long endTime = System.nanoTime();
+                long endTime = ourTimer.nanoTime();
                 long elapsedTime = endTime - startTime;
                 // limit maximum to avoid one-time spikes that hard to restore from
                 // can overflow a little, but restores in 2 full periods

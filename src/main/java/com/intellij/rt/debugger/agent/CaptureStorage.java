@@ -31,7 +31,7 @@ public final class CaptureStorage {
           System.getProperty("debugger.async.stack.trace.for.all.threads", "false")
   );
 
-  private static final OverheadDetector ourOverheadDetector = new OverheadDetector();
+  private static final OverheadDetector ourOverheadDetector = new OverheadDetector(1);
 
   private static Deque<CapturedStack> getStacksForCurrentThread() {
     if (storeAsyncStackTracesForAllThreads) {
