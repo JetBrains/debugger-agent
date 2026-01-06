@@ -22,7 +22,8 @@ public class OverheadDetector {
         }
     };
 
-    private static final long PERIOD_NS = TimeUnit.MILLISECONDS.toNanos(512);
+    // approximately 537ms
+    private static final long PERIOD_NS = 512 * (1 << 20);
     private final long MAX_OVERHEAD_NS;
 
     public OverheadDetector(double targetOverheadPercent) {
