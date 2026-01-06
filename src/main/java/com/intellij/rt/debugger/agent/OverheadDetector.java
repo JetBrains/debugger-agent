@@ -22,8 +22,9 @@ public class OverheadDetector {
         }
     };
 
+    private static final long PERIOD_POWER = 29;
     // approximately 537ms
-    private static final long PERIOD_NS = 512 * (1 << 20);
+    private static final long PERIOD_NS = 1 << PERIOD_POWER;
     private final long MAX_OVERHEAD_NS;
 
     public OverheadDetector(double targetOverheadPercent) {
@@ -151,11 +152,17 @@ public class OverheadDetector {
          * Restores the permitted overhead capacity proportionally to the time passed since the last execution.
          */
         private void restore(long currentTime) {
-            long passedTime = currentTime - myLastExecutionTime;
-            long restored = MAX_OVERHEAD_NS * passedTime / PERIOD_NS;
-
+            long lastTime = myLastExecutionTime;
             myLastExecutionTime = currentTime;
-            myOverhead = Math.max(0, myOverhead - restored);
+
+            long passedTime = currentTime - lastTime;
+            long restored = (MAX_OVERHEAD_NS * passedTime) >> PERIOD_POWER;
+
+            long overhead = myOverhead - restored;
+            if (overhead < 0) {
+                overhead = 0;
+            }
+            myOverhead = overhead;
         }
     }
 }
