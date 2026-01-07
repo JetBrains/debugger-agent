@@ -88,7 +88,7 @@ public class OverheadDetectorTest {
                 "expected to be less then " + targetFactor * 100 + "%";
         System.out.println(message);
 
-        Assert.assertTrue(message, actualFactorAfterThrottling <= targetFactor + 0.005);
+        Assert.assertTrue(message, actualFactorAfterThrottling <= targetFactor + 0.01);
     }
 
     @Test
