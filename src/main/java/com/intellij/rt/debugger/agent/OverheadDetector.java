@@ -23,8 +23,11 @@ public class OverheadDetector {
     };
 
     private static final long PERIOD_POWER = 29;
-    // approximately 537ms
-    private static final long PERIOD_NS = 1 << PERIOD_POWER;
+    // Approximately 537ms.
+    // Time resolution is ~15.6ms on Windows
+    // => period should be at least 15.6 / targetOverheadPercent
+    // with targetOverheadPercent = 20%, the period should be at least 78ms
+    private static final long PERIOD_NS = 1L << PERIOD_POWER;
     private final long MAX_OVERHEAD_NS;
 
     public OverheadDetector(double targetOverheadPercent) {

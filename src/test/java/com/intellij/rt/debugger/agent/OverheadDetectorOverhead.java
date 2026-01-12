@@ -6,7 +6,7 @@ import java.util.concurrent.TimeUnit;
 
 public class OverheadDetectorOverhead {
     private static void measureOverhead(boolean throttlingEnabled) {
-        OverheadDetector detector = new OverheadDetector(1);
+        OverheadDetector detector = new OverheadDetector(20);
         detector.throttleWhenOverhead = throttlingEnabled;
 
         long start = System.nanoTime();

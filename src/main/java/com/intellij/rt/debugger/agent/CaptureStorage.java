@@ -32,7 +32,7 @@ public final class CaptureStorage {
   );
 
   private static final OverheadDetector ourOverheadDetector = new OverheadDetector(Double.parseDouble(
-          System.getProperty("debugger.agent.overhead.percent", "1")
+          System.getProperty("debugger.agent.overhead.percent", "20")
   ));
 
   private static Deque<CapturedStack> getStacksForCurrentThread() {

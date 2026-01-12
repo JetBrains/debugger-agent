@@ -11,12 +11,14 @@ import org.openjdk.jmh.infra.Blackhole;
 
 @RunWith(JUnitParamsRunner.class)
 public class OverheadDetectorTest {
-    private static final double TARGET_OVERHEAD_PERCENT = 1;
+    private static final String TARGET_OVERHEAD = "0.2";
+    private static final double TARGET_OVERHEAD_PERCENT = Float.parseFloat(TARGET_OVERHEAD) * 100;
 
-    // 1% overhead should not be detected
-    private final double NON_DETECTED_PERCENT = 0.8 * TARGET_OVERHEAD_PERCENT;
-    // 2% overhead should be detected
-    private final double DETECTED_PERCENT = 2 * TARGET_OVERHEAD_PERCENT;
+    private static final boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
+    private final double NON_DETECTED_PERCENT = (isWindows ? 0.5 : 0.95) * TARGET_OVERHEAD_PERCENT;
+    private final double DETECTED_PERCENT = (isWindows ? 1.8 : 1.2) * TARGET_OVERHEAD_PERCENT;
+    @SuppressWarnings("FieldCanBeLocal")
+    private final double THROTTLING_FACTOR = 1.4;
 
 
     @Test
@@ -24,7 +26,7 @@ public class OverheadDetectorTest {
         OverheadDetector detector = new OverheadDetector(TARGET_OVERHEAD_PERCENT);
         detector.throttleWhenOverhead = true;
 
-        int repeats = 5_000;
+        int repeats = 10_000;
         int invocations = runExperiment(detector, repeats, NON_DETECTED_PERCENT);
         Assert.assertEquals(repeats, invocations);
     }
@@ -34,7 +36,7 @@ public class OverheadDetectorTest {
         OverheadDetector detector = new OverheadDetector(TARGET_OVERHEAD_PERCENT);
         detector.throttleWhenOverhead = true;
 
-        int repeats = 5_000;
+        int repeats = 50_000;
         int invocations = runExperiment(detector, repeats, DETECTED_PERCENT);
         Assert.assertNotEquals(repeats, invocations);
     }
@@ -44,7 +46,7 @@ public class OverheadDetectorTest {
         final OverheadDetector detector = new OverheadDetector(TARGET_OVERHEAD_PERCENT);
         detector.throttleWhenOverhead = true;
 
-        final int repeats = 5_000;
+        final int repeats = 50_000;
         final int[] invocations = new int[2];
         Thread thread1 = new Thread(new Runnable() {
             @Override
@@ -70,11 +72,11 @@ public class OverheadDetectorTest {
     }
 
     @Parameters({
-            "0.01, 0.99, 10000000",
-            "0.01, 0.75, 1000000",
-            "0.01, 0.15, 50000",
-            "0.01, 0.05, 10000",
-            "0.01, 0.01, 1000",
+            TARGET_OVERHEAD + ", 0.99, 10000000",
+            TARGET_OVERHEAD + ", 0.75, 500000",
+            TARGET_OVERHEAD + ", 0.50, 100000",
+            TARGET_OVERHEAD + ", 0.25, 50000",
+            TARGET_OVERHEAD + ", 0.10, 10000",
     })
     @Test
     public void testThrottling(double targetFactor, double measuredFactor, int repeats) {
@@ -88,7 +90,7 @@ public class OverheadDetectorTest {
                 "expected to be less then " + targetFactor * 100 + "%";
         System.out.println(message);
 
-        Assert.assertTrue(message, actualFactorAfterThrottling <= targetFactor + 0.01);
+        Assert.assertTrue(message, actualFactorAfterThrottling <= THROTTLING_FACTOR * targetFactor);
     }
 
     @Test
@@ -96,7 +98,7 @@ public class OverheadDetectorTest {
         OverheadDetector detector = new OverheadDetector(TARGET_OVERHEAD_PERCENT);
         detector.throttleWhenOverhead = false;
 
-        int repeats = 5_000;
+        int repeats = 50_000;
         int invocations = runExperiment(detector, repeats, 100);
         Assert.assertEquals(repeats, invocations);
     }
