@@ -9,10 +9,12 @@ public class OverheadDetectorOverhead {
         OverheadDetector detector = new OverheadDetector(20);
         detector.throttleWhenOverhead = throttlingEnabled;
 
+        ThreadLocal<OverheadDetector.PerThread> threadLocalDetector = OverheadDetectorTest.wrap(detector);
+
         long start = System.nanoTime();
         int repeats = 1_000_000_000;
         for (int i = 0; i < repeats; i++) {
-            detector.runIfNoOverhead(new Runnable() {
+            threadLocalDetector.get().runIfNoOverhead(new Runnable() {
                 @Override
                 public void run() {
                     Blackhole.consumeCPU(1);

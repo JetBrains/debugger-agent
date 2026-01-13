@@ -35,6 +35,18 @@ public final class CaptureStorage {
           System.getProperty("debugger.agent.overhead.percent", "20")
   ));
 
+  static class ThreadLocalContext {
+    final OverheadDetector.PerThread overheadDetector = ourOverheadDetector.new PerThread();
+    boolean throwableCaptureDisabled = false;
+  }
+
+  static final ThreadLocal<ThreadLocalContext> CURRENT_CONTEXT = new ThreadLocal<ThreadLocalContext>() {
+    @Override
+    protected ThreadLocalContext initialValue() {
+      return new ThreadLocalContext();
+    }
+  };
+
   private static Deque<CapturedStack> getStacksForCurrentThread() {
     if (storeAsyncStackTracesForAllThreads) {
       Thread currentThread = Thread.currentThread();
@@ -48,13 +60,6 @@ public final class CaptureStorage {
       return CURRENT_STACKS.get();
     }
   }
-
-  private static final ThreadLocal<Boolean> THROWABLE_CAPTURE_DISABLED = new ThreadLocal<Boolean>() {
-    @Override
-    protected Boolean initialValue() {
-      return false;
-    }
-  };
 
   @SuppressWarnings("StaticNonFinalField")
   public static boolean DEBUG; // set from debugger
@@ -70,59 +75,50 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    ourOverheadDetector.runIfNoOverhead(new Runnable() {
+    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
       @Override
       public void run() {
-        withoutThrowableCapture(new Runnable() {
-          @Override
-          public void run() {
-            try {
-              if (DEBUG) {
-                System.out.println("captureGeneral " + getCallerDescriptorForLogging() + " - " + getKeyText(key));
-              }
-              CapturedStack stack = getStacksForCurrentThread().peekLast();
-              STORAGE_GENERAL.put(key, createCapturedStack(new Throwable(), stack));
-            }
-            // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
-            catch (AssertionError | Exception e) {
-              handleException(e);
-            }
+        try {
+          if (DEBUG) {
+            System.out.println("captureGeneral " + getCallerDescriptorForLogging() + " - " + getKeyText(key));
           }
-        });
+          CapturedStack stack = getStacksForCurrentThread().peekLast();
+          STORAGE_GENERAL.put(key, createCapturedStack(new Throwable(), stack));
+        }
+        // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
+        catch (AssertionError | Exception e) {
+          handleException(e);
+        }
       }
     });
   }
 
   @SuppressWarnings("unused")
   public static void captureThrowable(final Throwable throwable) {
-    if (!ENABLED || THROWABLE_CAPTURE_DISABLED.get()) {
+    final ThreadLocalContext context = CURRENT_CONTEXT.get();
+    if (!ENABLED || context.throwableCaptureDisabled) {
       return;
     }
-    ourOverheadDetector.runIfNoOverhead(new Runnable() {
+    runWithOverheadTrackingAndWithoutThrowableCapture(context, new Runnable() {
       @Override
       public void run() {
-        withoutThrowableCapture(new Runnable() {
-          @Override
-          public void run() {
-            // TODO: support coroutine stack traces
-            try {
-              if (DEBUG) {
-                System.out.println("captureThrowable " + getCallerDescriptorForLogging() + " - " + getKeyText(throwable));
-              }
-              CapturedStack stack = getStacksForCurrentThread().peekLast();
-              if (stack != null) {
-                // Ensure that we don't leak throwable here, IDEA-360126
-                assert !(stack instanceof ExceptionCapturedStack) ||
-                        ((ExceptionCapturedStack) stack).myException != throwable;
-                STORAGE_THROWABLES.put(throwable, stack);
-              }
-            }
-            // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
-            catch (AssertionError | Exception e) {
-              handleException(e);
-            }
+        // TODO: support coroutine stack traces
+        try {
+          if (DEBUG) {
+            System.out.println("captureThrowable " + getCallerDescriptorForLogging() + " - " + getKeyText(throwable));
           }
-        });
+          CapturedStack stack = getStacksForCurrentThread().peekLast();
+          if (stack != null) {
+            // Ensure that we don't leak throwable here, IDEA-360126
+            assert !(stack instanceof ExceptionCapturedStack) ||
+                    ((ExceptionCapturedStack) stack).myException != throwable;
+            STORAGE_THROWABLES.put(throwable, stack);
+          }
+        }
+        // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
+        catch (AssertionError | Exception e) {
+          handleException(e);
+        }
       }
     });
   }
@@ -132,25 +128,20 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    ourOverheadDetector.runIfNoOverhead(new Runnable() {
+    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
       @Override
       public void run() {
-        withoutThrowableCapture(new Runnable() {
-          @Override
-          public void run() {
-            try {
-              CapturedStack stack = STORAGE_GENERAL.get(key);
-              Deque<CapturedStack> currentStacks = getStacksForCurrentThread();
-              currentStacks.add(stack);
-              if (DEBUG) {
-                System.out.println(
-                        "insert " + getCallerDescriptorForLogging() + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
-              }
-            } catch (Exception e) {
-              handleException(e);
-            }
+        try {
+          CapturedStack stack = STORAGE_GENERAL.get(key);
+          Deque<CapturedStack> currentStacks = getStacksForCurrentThread();
+          currentStacks.add(stack);
+          if (DEBUG) {
+            System.out.println(
+                    "insert " + getCallerDescriptorForLogging() + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
           }
-        });
+        } catch (Exception e) {
+          handleException(e);
+        }
       }
     });
   }
@@ -160,26 +151,21 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    ourOverheadDetector.runIfNoOverhead(new Runnable() {
+    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
       @Override
       public void run() {
-        withoutThrowableCapture(new Runnable() {
-          @Override
-          public void run() {
-            try {
-              Deque<CapturedStack> currentStacks = getStacksForCurrentThread();
-              // frameworks may modify thread locals to avoid memory leaks, so do not fail if currentStacks is empty
-              // check https://youtrack.jetbrains.com/issue/IDEA-357455 for more details
-              currentStacks.pollLast();
-              if (DEBUG) {
-                System.out.println(
-                        "insert " + getCallerDescriptorForLogging() + " <- " + getKeyText(key) + ", stack removed (" + currentStacks.size() + ")");
-              }
-            } catch (Exception e) {
-              handleException(e);
-            }
+        try {
+          Deque<CapturedStack> currentStacks = getStacksForCurrentThread();
+          // frameworks may modify thread locals to avoid memory leaks, so do not fail if currentStacks is empty
+          // check https://youtrack.jetbrains.com/issue/IDEA-357455 for more details
+          currentStacks.pollLast();
+          if (DEBUG) {
+            System.out.println(
+                    "insert " + getCallerDescriptorForLogging() + " <- " + getKeyText(key) + ", stack removed (" + currentStacks.size() + ")");
           }
-        });
+        } catch (Exception e) {
+          handleException(e);
+        }
       }
     });
   }
@@ -245,25 +231,26 @@ public final class CaptureStorage {
     T call();
   }
 
+  private static void runWithOverheadTrackingAndWithoutThrowableCapture(ThreadLocalContext context, final Runnable runnable) {
   // It's better to disable throwable instrumentation inside our own code for ease of debugging.
-  private static void withoutThrowableCapture(final Runnable runnable) {
-    withoutThrowableCapture(new Callable<Void>() {
-      @Override
-      public Void call() {
-        runnable.run();
-        return null;
-      }
-    });
+    boolean oldValue = context.throwableCaptureDisabled;
+    context.throwableCaptureDisabled = true;
+    try {
+      context.overheadDetector.runIfNoOverhead(runnable);
+    } finally {
+      context.throwableCaptureDisabled = oldValue;
+    }
   }
 
   // It's better to disable throwable instrumentation inside our own code for ease of debugging.
   private static <T> T withoutThrowableCapture(Callable<T> action) {
-    Boolean oldValue = THROWABLE_CAPTURE_DISABLED.get();
-    THROWABLE_CAPTURE_DISABLED.set(true);
+    ThreadLocalContext context = CURRENT_CONTEXT.get();
+    boolean oldValue = context.throwableCaptureDisabled;
+    context.throwableCaptureDisabled = true;
     try {
       return action.call();
     } finally {
-      THROWABLE_CAPTURE_DISABLED.set(oldValue);
+      context.throwableCaptureDisabled = oldValue;
     }
   }
 
@@ -440,7 +427,7 @@ public final class CaptureStorage {
   /**
    * If storing stack traces for all threads is enabled (`debugger.async.stack.trace.for.all.threads` is true),
    * returns the captured stack trace of the given thread or null if no stack trace was captured.
-   *
+   * <p>
    * If `debugger.async.stack.trace.for.all.threads` is false,
    * it only returns the captured stack trace for the current thread and null if no stack trace was captured or if the given thread is not the current thread.
    */
@@ -456,10 +443,11 @@ public final class CaptureStorage {
   /**
    * If storing stack traces for all threads is enabled (`debugger.async.stack.trace.for.all.threads` is true),
    * returns a map from thread to it's captured stack trace.
-   *
+   * <p>
    * If `debugger.async.stack.trace.for.all.threads` is false,
    * only returns a map from the current thread to its captured stack trace.
    */
+  @SuppressWarnings("unused")
   public static Map<Thread, String> getAllCapturedStacks(int limit) {
     HashMap<Thread, String> threadToStacks = new HashMap<>();
     if (storeAsyncStackTracesForAllThreads) {

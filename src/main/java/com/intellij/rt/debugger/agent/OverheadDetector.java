@@ -15,13 +15,6 @@ public class OverheadDetector {
     volatile boolean throttleWhenOverhead = false;
     private final AtomicBoolean myFirstOverheadDetected = new AtomicBoolean(false);
 
-    private final ThreadLocal<PerThread> myThreadLocal = new ThreadLocal<PerThread>() {
-        @Override
-        protected PerThread initialValue() {
-            return new PerThread();
-        }
-    };
-
     private static final long PERIOD_POWER = 29;
     // Approximately 537ms.
     // Time resolution is ~15.6ms on Windows
@@ -32,14 +25,6 @@ public class OverheadDetector {
 
     public OverheadDetector(double targetOverheadPercent) {
         MAX_OVERHEAD_NS = Math.round(targetOverheadPercent * PERIOD_NS / 100);
-    }
-
-    /**
-     * Runs the provided runnable if there is no overhead detected or throttling is disabled.
-     * The execution of the runnable is not guaranteed.
-     */
-    public void runIfNoOverhead(Runnable runnable) {
-        myThreadLocal.get().runIfNoOverhead(runnable);
     }
 
     void onOverheadDetected() {
@@ -93,13 +78,17 @@ public class OverheadDetector {
     /**
      * During a single period ({@link #PERIOD_NS}) of time, the overhead is limited to {@link #MAX_OVERHEAD_NS}.
      */
-    private class PerThread {
+    class PerThread {
         private long myLastExecutionTime = ourTimer.nanoTime();
         private long myOverhead = 0;
         private boolean myInProgress = false;
         private boolean myLocalThrottleWhenOverhead = throttleWhenOverhead;
         private boolean myLocalFirstOverheadDetected = myFirstOverheadDetected.get();
 
+        /**
+         * Runs the provided runnable if there is no overhead detected or throttling is disabled.
+         * The execution of the runnable is not guaranteed.
+         */
         public void runIfNoOverhead(Runnable runnable) {
             // do nothing in recursive calls
             if (myInProgress) {
