@@ -88,25 +88,26 @@ public class ConditionalBreakpointTransformer {
             final List<Integer> successIds = new ArrayList<>();
 
             try {
-                String[] megaInfo = requestInstrumentedInfo(className);
-                if (megaInfo.length == 0) {
+                String[][] infoTable = requestInstrumentedInfo(className);
+                if (infoTable.length == 0) {
                     return null;
                 }
 
                 final Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods = new LinkedHashMap<>();
-                for (String info : megaInfo) {
-                    List<String> split = Arrays.asList(info.split(" "));
-                    String className2 = split.get(0);
+                for (String[] infoArray : infoTable) {
+                    List<String> info = Arrays.asList(infoArray);
+
+                    String className2 = info.get(0);
                     if (!className2.equals(className)) {
                         // TODO: ERROR here
                         continue;
                     }
-                    String methodName = split.get(1);
-                    int lineNumber = Integer.parseInt(split.get(2));
-                    String fragmentClassName = split.get(3);
-                    String fragmentEntryMethodName = split.get(4);
-                    String methodSignature = split.get(5);
-                    List<String> argumentNames = split.subList(6, split.size());
+                    String methodName = info.get(1);
+                    int lineNumber = Integer.parseInt(info.get(2));
+                    String fragmentClassName = info.get(3);
+                    String fragmentEntryMethodName = info.get(4);
+                    String methodSignature = info.get(5);
+                    List<String> argumentNames = info.subList(6, info.size());
 
                     Map<Integer, InstrumentationBreakpointInfo> lineNumbers = getLineNumbers(methodName, methods);
                     if (lineNumbers == null) {
@@ -428,8 +429,8 @@ public class ConditionalBreakpointTransformer {
         s.close();
     }
 
-    public static String[] requestInstrumentedInfo(@SuppressWarnings("unused") String className) {
-        return new String[0];
+    public static String[][] requestInstrumentedInfo(@SuppressWarnings("unused") String className) {
+        return new String[0][];
     }
 
     @SuppressWarnings("unused")
