@@ -139,7 +139,8 @@ public final class CaptureStorage {
             System.out.println(
                     "insert " + getCallerDescriptorForLogging() + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
           }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
           handleException(e);
         }
       }
