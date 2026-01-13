@@ -161,6 +161,8 @@ public class ConditionalBreakpointTransformer {
                             public void visitLineNumber(int line, Label start) {
                                 InstrumentationBreakpointMappingInfo instrumentationBreakpointInfo = argumentMapping.get(line);
                                 if (instrumentationBreakpointInfo != null) {
+                                    // Set only one breakpoint per line
+                                    argumentMapping.remove(line);
                                     addInstrumentationCondition(instrumentationBreakpointInfo);
                                 }
                                 super.visitLineNumber(line, start);
@@ -260,9 +262,25 @@ public class ConditionalBreakpointTransformer {
     private static Map<Integer, InstrumentationBreakpointMappingInfo> collectArgumentMapping(MethodNode method, Map<Integer, InstrumentationBreakpointInfo> lineNumbers) {
         final Map<Integer, InstrumentationBreakpointMappingInfo> remappingInfo = new HashMap<>();
 
-        Set<Integer> visitedLineNumbers = new HashSet<>();
+        Map<Integer, Integer> visitedLineNumbers = new HashMap<>();
+
+        int lastControlInstructionIndex = -1;
+
         for (int instructionIndex = 0; instructionIndex < method.instructions.size(); instructionIndex++) {
             AbstractInsnNode instruction = method.instructions.get(instructionIndex);
+
+            int opcode = instruction.getOpcode();
+            if (instruction instanceof JumpInsnNode ||
+                instruction instanceof TableSwitchInsnNode ||
+                instruction instanceof LookupSwitchInsnNode ||
+                opcode == Opcodes.RET ||
+                opcode == Opcodes.ATHROW ||
+                (opcode >= Opcodes.IRETURN && opcode <= Opcodes.RETURN)
+            ) {
+                lastControlInstructionIndex = instructionIndex;
+            }
+
+
             if (!(instruction instanceof LineNumberNode)) {
                 continue;
             }
@@ -274,8 +292,8 @@ public class ConditionalBreakpointTransformer {
             }
             try {
                 // skip non-trivial cases for now
-                boolean isFirstTimeMetLineNumber = visitedLineNumbers.add(lineNumber);
-                if (!isFirstTimeMetLineNumber) {
+                Integer previous = visitedLineNumbers.put(lineNumber, instructionIndex);
+                if (previous != null && previous < lastControlInstructionIndex) {
                     impossibleToInstrument("Several instructions marked with the same line " + lineNumber, instrumentationBreakpointInfo.instrumentationId);
                     remappingInfo.remove(lineNumber);
                 }
