@@ -18,7 +18,7 @@ public class OverheadDetectorTest {
     private final double NON_DETECTED_PERCENT = (isWindows ? 0.5 : 0.95) * TARGET_OVERHEAD_PERCENT;
     private final double DETECTED_PERCENT = (isWindows ? 1.8 : 1.2) * TARGET_OVERHEAD_PERCENT;
     @SuppressWarnings("FieldCanBeLocal")
-    private final double THROTTLING_FACTOR = 1.4;
+    private final double THROTTLING_FACTOR = 2.0;
 
 
     @Test
