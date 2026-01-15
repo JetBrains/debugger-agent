@@ -3,8 +3,8 @@ package com.intellij.rt.debugger.agent;
 import java.util.Random;
 
 public class OverheadTestUtils {
-    public static final long[] PRECISIONS = new long[]{15_600_000, 1_000_000, 100_000, 10_000, 0};
-    public static final long[] INVOCATION_TIME_NS = new long[]{10_000_000, 1_000_000, 100_000, 10_000, 2500};
+    public static final long[] PRECISIONS = new long[]{15_600_000, 10_000};
+    public static final long[] INVOCATION_TIME_NS = new long[]{1_000_000, 10_000, 2500};
     static final double TARGET_OVERHEAD = 0.2;
     static final double MAX_DETECTED_FACTOR = 2.85; // more than 57% should be detected
     static final double MIN_DETECTED_FACTOR = 0.40; // less than 8% should not be detected

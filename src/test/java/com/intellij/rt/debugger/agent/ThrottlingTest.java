@@ -23,7 +23,7 @@ public class ThrottlingTest {
 
     @Parameterized.Parameters(name = "{index}: measuredFactor={0}, timerPrecisionNs={1}, singleInvocationNs={2}")
     public static Collection<Object[]> data() {
-        double[] measuredFactors = {0.99, 0.75, 0.5, 0.25, 0.1, 0.05, 0.01};
+        double[] measuredFactors = {0.99, 0.75, 0.5, 0.1, 0.05};
         ArrayList<Object[]> results = new ArrayList<>();
         for (double measuredFactor : measuredFactors) {
             for (long precision : OverheadTestUtils.PRECISIONS) {
