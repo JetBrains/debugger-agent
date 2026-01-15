@@ -10,6 +10,7 @@ import java.util.Collection;
 
 @RunWith(Parameterized.class)
 public class ThrottlingTest {
+    private static final int REPEATS = 10_000_000;
     private final double measuredFactor;
     private final long timerPrecisionNs;
     private final long singleInvocationNs;
@@ -23,12 +24,10 @@ public class ThrottlingTest {
     @Parameterized.Parameters(name = "{index}: measuredFactor={0}, timerPrecisionNs={1}, singleInvocationNs={2}")
     public static Collection<Object[]> data() {
         double[] measuredFactors = {0.99, 0.75, 0.5, 0.25, 0.1, 0.05, 0.01};
-        long[] precisions = {15_600_000, 50_000, 10_000, 0};
-        long[] invocationTimeNs = {16_000, 2500};
         ArrayList<Object[]> results = new ArrayList<>();
         for (double measuredFactor : measuredFactors) {
-            for (long precision : precisions) {
-                for (long invocationTime : invocationTimeNs) {
+            for (long precision : OverheadTestUtils.PRECISIONS) {
+                for (long invocationTime : OverheadTestUtils.INVOCATION_TIME_NS) {
                     results.add(new Object[]{measuredFactor, precision, invocationTime});
                 }
             }
@@ -44,7 +43,7 @@ public class ThrottlingTest {
                 true,
                 timerPrecisionNs,
                 singleInvocationNs,
-                10_000_000);
+                REPEATS);
 
         OverheadTestUtils.ExperimentInfo experimentInfo = OverheadTestUtils.runExperiment(config, 100 * measuredFactor);
 

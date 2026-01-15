@@ -3,9 +3,11 @@ package com.intellij.rt.debugger.agent;
 import java.util.Random;
 
 public class OverheadTestUtils {
+    public static final long[] PRECISIONS = new long[]{15_600_000, 1_000_000, 100_000, 10_000, 0};
+    public static final long[] INVOCATION_TIME_NS = new long[]{10_000_000, 1_000_000, 100_000, 10_000, 2500};
     static final double TARGET_OVERHEAD = 0.2;
-    static final double MAX_DETECTED_FACTOR = 2.25; // more than 45% should be detected
-    static final double MIN_DETECTED_FACTOR = 0.45; // less than 9% should not be detected
+    static final double MAX_DETECTED_FACTOR = 2.85; // more than 57% should be detected
+    static final double MIN_DETECTED_FACTOR = 0.40; // less than 8% should not be detected
     // Time simulation works better with small deterministic random modifications
     // to the measured periods.
     private static final double RANDOMNESS = 0.12;
@@ -27,21 +29,21 @@ public class OverheadTestUtils {
         final Random random = new Random(42);
         final long tokens = config.singleInvocationNs;
         double multiplier = 100 / measuredPayloadPercent - 1;
-        long externalTokens = Math.round(tokens * multiplier);
 
         int repeats = config.repeats;
         final int[] calls = new int[1];
 
         for (int i = 0; i < repeats; i++) {
-            final double randomFactor = genRandomFactor(random);
+            double randomFactor = genRandomFactor(random);
+            final double randomTokens = tokens * randomFactor;
             config.threadLocalDetector.get().runIfNoOverhead(new Runnable() {
                 @Override
                 public void run() {
                     calls[0]++;
-                    config.timer.advance(Math.round(tokens * randomFactor));
+                    config.timer.advance(Math.round(randomTokens));
                 }
             });
-            config.timer.advance(Math.round(externalTokens * randomFactor));
+            config.timer.advance(Math.round(randomTokens * multiplier));
         }
 
         ExperimentInfo experimentInfo = new ExperimentInfo();

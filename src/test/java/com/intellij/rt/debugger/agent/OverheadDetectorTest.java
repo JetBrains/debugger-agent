@@ -13,6 +13,7 @@ import java.util.Collection;
 @RunWith(Parameterized.class)
 public class OverheadDetectorTest {
     private static final double TARGET_OVERHEAD_PERCENT = OverheadTestUtils.TARGET_OVERHEAD * 100;
+    private static final int REPEATS = 1_000_000;
     private final long timerPrecisionNs;
     private final long singleInvocationNs;
 
@@ -23,11 +24,9 @@ public class OverheadDetectorTest {
 
     @Parameterized.Parameters(name = "{index}: timerPrecisionNs={0}, singleInvocationNs={1}")
     public static Collection<Object[]> data() {
-        long[] precisions = {15_600_000, 100_000, 10_000, 0};
-        long[] invocationTimeNs = {16_000, 10_000, 2500};
         ArrayList<Object[]> results = new ArrayList<>();
-        for (long precision : precisions) {
-            for (long invocationTime : invocationTimeNs) {
+        for (long precision : OverheadTestUtils.PRECISIONS) {
+            for (long invocationTime : OverheadTestUtils.INVOCATION_TIME_NS) {
                 results.add(new Object[]{precision, invocationTime});
             }
         }
@@ -75,6 +74,6 @@ public class OverheadDetectorTest {
                 throttleWhenOverhead,
                 timerPrecisionNs,
                 singleInvocationNs,
-                1_000_000);
+                REPEATS);
     }
 }
