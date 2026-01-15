@@ -8,6 +8,12 @@ import java.util.concurrent.locks.LockSupport;
  * This class is responsible for detecting and managing system overhead while executing tasks.
  * It monitors and tracks task execution times and determines if the system is under significant overhead.
  * It prevents tasks from executing if overhead thresholds are surpassed and throttling is enabled.
+ * <p>
+ * This algorithm employs a leaky bucket mechanism over a sliding period (PERIOD_NS) to precisely manage overhead,
+ * proportionally restoring budget based on elapsed time for gradual decay and rapid recovery from bursts.
+ * It caps overhead accumulation at 2x the max budget to handle one-time spikes without prolonged throttling,
+ * while a coarse timer minimizes timing costs.
+ * Per-thread isolation ensures fair tracking in multithreaded environments.
  */
 // DO NOT CHANGE SIGNATURE: used from debugger
 public class OverheadDetector {
@@ -20,6 +26,10 @@ public class OverheadDetector {
     // => period should be at least 15.6 / targetOverheadPercent
     // with targetOverheadPercent = 20%, the period should be at least 78ms
     private static final long PERIOD_NS = 1L << 29;
+
+    /**
+     * During a single period ({@link #PERIOD_NS}) of time, the overhead is limited to MAX_OVERHEAD_NS.
+     */
     private final long MAX_OVERHEAD_NS;
 
     public OverheadDetector(double targetOverheadPercent) {
@@ -74,9 +84,6 @@ public class OverheadDetector {
     // 1000+ us on Windows
     private static final CoarseTimer ourTimer = new CoarseTimer(TimeUnit.MICROSECONDS.toNanos(10));
 
-    /**
-     * During a single period ({@link #PERIOD_NS}) of time, the overhead is limited to {@link #MAX_OVERHEAD_NS}.
-     */
     class PerThread {
         private long myLastExecutionTime = ourTimer.nanoTime();
         private long myOverhead = 0;
