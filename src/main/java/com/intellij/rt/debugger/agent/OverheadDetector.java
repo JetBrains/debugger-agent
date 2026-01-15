@@ -51,11 +51,15 @@ public class OverheadDetector {
         // or disable agent completely
     }
 
+    interface Timer {
+        long nanoTime();
+    }
+
     /**
      * This timer is used to decrease the number of calls to System.nanoTime().
      * It updates the time every precisionNs nanoseconds.
      */
-    private static class CoarseTimer {
+    private static class CoarseTimer implements Timer {
         private volatile long myTimeNs = System.nanoTime();
 
         CoarseTimer(final long precisionNs) {
@@ -82,7 +86,12 @@ public class OverheadDetector {
     // 50-60 us on linux
     // 10-50 us on macOS
     // 1000+ us on Windows
-    private static final CoarseTimer ourTimer = new CoarseTimer(TimeUnit.MICROSECONDS.toNanos(10));
+    private Timer ourTimer = new CoarseTimer(TimeUnit.MICROSECONDS.toNanos(10));
+
+    // For testing purposes only
+    void setTimer(Timer timer) {
+        ourTimer = timer;
+    }
 
     class PerThread {
         private long myLastExecutionTime = ourTimer.nanoTime();
@@ -154,13 +163,16 @@ public class OverheadDetector {
             myLastExecutionTime = currentTime;
 
             long passedTime = currentTime - lastTime;
-            long restored = passedTime * MAX_OVERHEAD_NS / PERIOD_NS;
-
-            long overhead = myOverhead - restored;
-            if (overhead < 0) {
-                overhead = 0;
+            if (passedTime >= PERIOD_NS) {
+                myOverhead = 0;
+            } else {
+                long restored = passedTime * MAX_OVERHEAD_NS / PERIOD_NS;
+                long overhead = myOverhead - restored;
+                if (overhead < 0) {
+                    overhead = 0;
+                }
+                myOverhead = overhead;
             }
-            myOverhead = overhead;
         }
     }
 }

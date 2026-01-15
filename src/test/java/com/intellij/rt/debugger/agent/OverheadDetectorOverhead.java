@@ -9,7 +9,7 @@ public class OverheadDetectorOverhead {
         OverheadDetector detector = new OverheadDetector(20);
         detector.throttleWhenOverhead = throttlingEnabled;
 
-        ThreadLocal<OverheadDetector.PerThread> threadLocalDetector = OverheadDetectorTest.wrap(detector);
+        ThreadLocal<OverheadDetector.PerThread> threadLocalDetector = OverheadTestUtils.wrap(detector);
 
         long start = System.nanoTime();
         int repeats = 1_000_000_000;

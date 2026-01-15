@@ -15,7 +15,6 @@ repositories {
 dependencies {
     implementation files("lib/asm-capture-9.6.1.jar")
     testImplementation("junit:junit:4.13.1")
-    testImplementation("pl.pragmatists:JUnitParams:1.0.5")
     testImplementation("org.openjdk.jmh:jmh-core:1.37")
 }
 
