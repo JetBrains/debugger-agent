@@ -1,16 +1,11 @@
 package com.intellij.rt.debugger.agent;
 
-import java.util.Random;
-
 public class OverheadTestUtils {
     public static final long[] PRECISIONS = new long[]{15_600_000, 10_000};
-    public static final long[] INVOCATION_TIME_NS = new long[]{1_000_000, 10_000, 2500};
+    public static final long[] INVOCATION_TIME_NS = new long[]{1_000_000, 9_700, 2300};
     static final double TARGET_OVERHEAD = 0.2;
     static final double MAX_DETECTED_FACTOR = 2.85; // more than 57% should be detected
     static final double MIN_DETECTED_FACTOR = 0.40; // less than 8% should not be detected
-    // Time simulation works better with small deterministic random modifications
-    // to the measured periods.
-    private static final double RANDOMNESS = 0.12;
 
     static ThreadLocal<OverheadDetector.PerThread> wrap(final OverheadDetector detector) {
         return new ThreadLocal<OverheadDetector.PerThread>() {
@@ -21,29 +16,23 @@ public class OverheadTestUtils {
         };
     }
 
-    private static double genRandomFactor(Random random) {
-        return 1 - RANDOMNESS + (random.nextDouble() * RANDOMNESS * 2);
-    }
-
     static ExperimentInfo runExperiment(final ExperimentConfig config, double measuredPayloadPercent) {
-        final Random random = new Random(42);
         final long tokens = config.singleInvocationNs;
         double multiplier = 100 / measuredPayloadPercent - 1;
+        long externalTokens = Math.round(tokens * multiplier);
 
         int repeats = config.repeats;
         final int[] calls = new int[1];
 
         for (int i = 0; i < repeats; i++) {
-            double randomFactor = genRandomFactor(random);
-            final double randomTokens = tokens * randomFactor;
             config.threadLocalDetector.get().runIfNoOverhead(new Runnable() {
                 @Override
                 public void run() {
                     calls[0]++;
-                    config.timer.advance(Math.round(randomTokens));
+                    config.timer.advance(tokens);
                 }
             });
-            config.timer.advance(Math.round(randomTokens * multiplier));
+            config.timer.advance(externalTokens);
         }
 
         ExperimentInfo experimentInfo = new ExperimentInfo();
@@ -86,7 +75,6 @@ public class OverheadTestUtils {
 
         private static class State {
             private long timeNs = 0;
-            private long deferredNs = 0;
         }
 
         private final ThreadLocal<State> state = new ThreadLocal<State>() {
@@ -98,21 +86,15 @@ public class OverheadTestUtils {
 
         @Override
         public long nanoTime() {
-            return state.get().timeNs;
+            State currentState = state.get();
+            return (currentState.timeNs / precisionNs) * precisionNs;
         }
 
         public void advance(long deltaNs) {
             if (deltaNs < 0) {
                 throw new IllegalArgumentException("Negative deltaNs: " + deltaNs);
             }
-            State currentState = state.get();
-            long deferredNs = currentState.deferredNs + deltaNs;
-            if (deferredNs >= precisionNs) {
-                currentState.timeNs += deferredNs;
-                currentState.deferredNs = 0;
-            } else {
-                currentState.deferredNs = deferredNs;
-            }
+            state.get().timeNs += deltaNs;
         }
     }
 
