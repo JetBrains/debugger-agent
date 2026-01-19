@@ -31,6 +31,22 @@ public final class CaptureStorage {
           System.getProperty("debugger.async.stack.trace.for.all.threads", "false")
   );
 
+  private static final OverheadDetector ourOverheadDetector = new OverheadDetector(Double.parseDouble(
+          System.getProperty("debugger.agent.overhead.percent", "20")
+  ));
+
+  static class ThreadLocalContext {
+    final OverheadDetector.PerThread overheadDetector = ourOverheadDetector.new PerThread();
+    boolean throwableCaptureDisabled = false;
+  }
+
+  static final ThreadLocal<ThreadLocalContext> CURRENT_CONTEXT = new ThreadLocal<ThreadLocalContext>() {
+    @Override
+    protected ThreadLocalContext initialValue() {
+      return new ThreadLocalContext();
+    }
+  };
+
   private static Deque<CapturedStack> getStacksForCurrentThread() {
     if (storeAsyncStackTracesForAllThreads) {
       Thread currentThread = Thread.currentThread();
@@ -45,16 +61,9 @@ public final class CaptureStorage {
     }
   }
 
-  private static final ThreadLocal<Boolean> THROWABLE_CAPTURE_DISABLED = new ThreadLocal<Boolean>() {
-    @Override
-    protected Boolean initialValue() {
-      return false;
-    }
-  };
-
   @SuppressWarnings("StaticNonFinalField")
   public static boolean DEBUG; // set from debugger
-  private static boolean ENABLED = true;
+  private static boolean ENABLED = true; // set from debugger
 
   static final StackTraceElement ASYNC_STACK_ELEMENT =
           new StackTraceElement("--- Async", "Stack.Trace --- ", "captured by IntelliJ IDEA debugger", -1);
@@ -66,7 +75,7 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    withoutThrowableCapture(new Runnable() {
+    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
       @Override
       public void run() {
         try {
@@ -86,10 +95,11 @@ public final class CaptureStorage {
 
   @SuppressWarnings("unused")
   public static void captureThrowable(final Throwable throwable) {
-    if (!ENABLED || THROWABLE_CAPTURE_DISABLED.get()) {
+    final ThreadLocalContext context = CURRENT_CONTEXT.get();
+    if (!ENABLED || context.throwableCaptureDisabled) {
       return;
     }
-    withoutThrowableCapture(new Runnable() {
+    runWithOverheadTrackingAndWithoutThrowableCapture(context, new Runnable() {
       @Override
       public void run() {
         // TODO: support coroutine stack traces
@@ -118,7 +128,7 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    withoutThrowableCapture(new Runnable() {
+    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
       @Override
       public void run() {
         try {
@@ -142,7 +152,7 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    withoutThrowableCapture(new Runnable() {
+    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
       @Override
       public void run() {
         try {
@@ -222,25 +232,26 @@ public final class CaptureStorage {
     T call();
   }
 
+  private static void runWithOverheadTrackingAndWithoutThrowableCapture(ThreadLocalContext context, final Runnable runnable) {
   // It's better to disable throwable instrumentation inside our own code for ease of debugging.
-  private static void withoutThrowableCapture(final Runnable runnable) {
-    withoutThrowableCapture(new Callable<Void>() {
-      @Override
-      public Void call() {
-        runnable.run();
-        return null;
-      }
-    });
+    boolean oldValue = context.throwableCaptureDisabled;
+    context.throwableCaptureDisabled = true;
+    try {
+      context.overheadDetector.runIfNoOverhead(runnable);
+    } finally {
+      context.throwableCaptureDisabled = oldValue;
+    }
   }
 
   // It's better to disable throwable instrumentation inside our own code for ease of debugging.
   private static <T> T withoutThrowableCapture(Callable<T> action) {
-    Boolean oldValue = THROWABLE_CAPTURE_DISABLED.get();
-    THROWABLE_CAPTURE_DISABLED.set(true);
+    ThreadLocalContext context = CURRENT_CONTEXT.get();
+    boolean oldValue = context.throwableCaptureDisabled;
+    context.throwableCaptureDisabled = true;
     try {
       return action.call();
     } finally {
-      THROWABLE_CAPTURE_DISABLED.set(oldValue);
+      context.throwableCaptureDisabled = oldValue;
     }
   }
 
@@ -417,7 +428,7 @@ public final class CaptureStorage {
   /**
    * If storing stack traces for all threads is enabled (`debugger.async.stack.trace.for.all.threads` is true),
    * returns the captured stack trace of the given thread or null if no stack trace was captured.
-   *
+   * <p>
    * If `debugger.async.stack.trace.for.all.threads` is false,
    * it only returns the captured stack trace for the current thread and null if no stack trace was captured or if the given thread is not the current thread.
    */
@@ -433,10 +444,11 @@ public final class CaptureStorage {
   /**
    * If storing stack traces for all threads is enabled (`debugger.async.stack.trace.for.all.threads` is true),
    * returns a map from thread to it's captured stack trace.
-   *
+   * <p>
    * If `debugger.async.stack.trace.for.all.threads` is false,
    * only returns a map from the current thread to its captured stack trace.
    */
+  @SuppressWarnings("unused")
   public static Map<Thread, String> getAllCapturedStacks(int limit) {
     HashMap<Thread, String> threadToStacks = new HashMap<>();
     if (storeAsyncStackTracesForAllThreads) {
