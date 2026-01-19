@@ -69,7 +69,19 @@ public class OverheadDetectorTest {
         Assert.assertEquals(0, experimentInfo.skippedInvocations);
     }
 
-    OverheadTestUtils.ExperimentConfig create(boolean throttleWhenOverhead) {
+    @Test
+    public void testNoOverheadDetectedWith100PercentTarget() {
+        // tests that we can disable detector by setting target to 100%
+        OverheadTestUtils.ExperimentConfig config = OverheadTestUtils.ExperimentConfig.create(100,
+                true,
+                timerPrecisionNs,
+                singleInvocationNs,
+                REPEATS);
+        OverheadTestUtils.ExperimentInfo experimentInfo = OverheadTestUtils.runExperiment(config, 100);
+        Assert.assertEquals(0, experimentInfo.skippedInvocations);
+    }
+
+    private OverheadTestUtils.ExperimentConfig create(boolean throttleWhenOverhead) {
         return OverheadTestUtils.ExperimentConfig.create(TARGET_OVERHEAD_PERCENT,
                 throttleWhenOverhead,
                 timerPrecisionNs,
