@@ -7,11 +7,11 @@ public class OverheadTestUtils {
     static final double MAX_DETECTED_FACTOR = 2.85; // more than 57% should be detected
     static final double MIN_DETECTED_FACTOR = 0.40; // less than 8% should not be detected
 
-    static ThreadLocal<OverheadDetector.PerThread> wrap(final OverheadDetector detector) {
-        return new ThreadLocal<OverheadDetector.PerThread>() {
+    static ThreadLocal<OverheadDetector.OverheadTracker> wrap(final OverheadDetector detector) {
+        return new ThreadLocal<OverheadDetector.OverheadTracker>() {
             @Override
-            protected OverheadDetector.PerThread initialValue() {
-                return detector.new PerThread();
+            protected OverheadDetector.OverheadTracker initialValue() {
+                return detector.createOverheadTracker();
             }
         };
     }
@@ -25,7 +25,7 @@ public class OverheadTestUtils {
         final int[] calls = new int[1];
 
         for (int i = 0; i < repeats; i++) {
-            config.threadLocalDetector.get().runIfNoOverhead(new Runnable() {
+            config.overheadTracker.get().runIfNoOverhead(new Runnable() {
                 @Override
                 public void run() {
                     calls[0]++;
@@ -45,7 +45,7 @@ public class OverheadTestUtils {
     static class ExperimentConfig {
         final MockTimer timer;
         final OverheadDetector detector;
-        final ThreadLocal<OverheadDetector.PerThread> threadLocalDetector;
+        final ThreadLocal<OverheadDetector.OverheadTracker> overheadTracker;
         final long singleInvocationNs;
         final int repeats;
 
@@ -55,7 +55,7 @@ public class OverheadTestUtils {
             this.repeats = repeats;
             detector.setTimer(timer);
             this.detector = detector;
-            this.threadLocalDetector = wrap(detector);
+            this.overheadTracker = wrap(detector);
         }
 
         static ExperimentConfig create(double targetOverheadPercent, boolean throttleWhenOverhead,

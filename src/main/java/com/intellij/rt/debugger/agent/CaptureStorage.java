@@ -36,7 +36,7 @@ public final class CaptureStorage {
   ));
 
   static class ThreadLocalContext {
-    final OverheadDetector.PerThread overheadDetector = ourOverheadDetector.new PerThread();
+    final OverheadDetector.OverheadTracker overheadTracker = ourOverheadDetector.createOverheadTracker();
     boolean throwableCaptureDisabled = false;
   }
 
@@ -237,7 +237,7 @@ public final class CaptureStorage {
     boolean oldValue = context.throwableCaptureDisabled;
     context.throwableCaptureDisabled = true;
     try {
-      context.overheadDetector.runIfNoOverhead(runnable);
+      context.overheadTracker.runIfNoOverhead(runnable);
     } finally {
       context.throwableCaptureDisabled = oldValue;
     }

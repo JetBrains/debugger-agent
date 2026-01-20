@@ -79,6 +79,8 @@ public class OverheadDetectorTest {
                 REPEATS);
         OverheadTestUtils.ExperimentInfo experimentInfo = OverheadTestUtils.runExperiment(config, 100);
         Assert.assertEquals(0, experimentInfo.skippedInvocations);
+        OverheadDetector.OverheadTracker tracker = config.overheadTracker.get();
+        Assert.assertEquals("NO_OP_TRACKER Should be used", 0, tracker.getClass().getDeclaredFields().length);
     }
 
     private OverheadTestUtils.ExperimentConfig create(boolean throttleWhenOverhead) {

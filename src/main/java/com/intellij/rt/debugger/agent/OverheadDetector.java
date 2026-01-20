@@ -31,9 +31,11 @@ public class OverheadDetector {
      * During a single period ({@link #PERIOD_NS}) of time, the overhead is limited to MAX_OVERHEAD_NS.
      */
     private final long MAX_OVERHEAD_NS;
+    private final double myTargetOverheadPercent;
 
     public OverheadDetector(double targetOverheadPercent) {
         MAX_OVERHEAD_NS = Math.round(targetOverheadPercent * PERIOD_NS / 100);
+        myTargetOverheadPercent = targetOverheadPercent;
     }
 
     void onOverheadDetected() {
@@ -60,15 +62,23 @@ public class OverheadDetector {
      * It updates the time every precisionNs nanoseconds.
      */
     private static class CoarseTimer implements Timer {
-        private volatile long myTimeNs = System.nanoTime();
+        private final AtomicBoolean myInitialized = new AtomicBoolean(false);
+        private final long myPrecisionNs;
+        private volatile long myTimeNs;
 
-        CoarseTimer(final long precisionNs) {
+        CoarseTimer(long precisionNs) {
+            myPrecisionNs = precisionNs;
+        }
+
+        public void initialize() {
+            if (!myInitialized.compareAndSet(false, true)) return;
+            myTimeNs = System.nanoTime();
             Thread thread = new Thread(new Runnable() {
 
                 @Override
                 public void run() {
                     while (true) {
-                        LockSupport.parkNanos(precisionNs);
+                        LockSupport.parkNanos(myPrecisionNs);
                         myTimeNs = System.nanoTime();
                     }
                 }
@@ -93,7 +103,26 @@ public class OverheadDetector {
         ourTimer = timer;
     }
 
-    class PerThread {
+    interface OverheadTracker {
+        void runIfNoOverhead(Runnable runnable);
+    }
+
+    private static final OverheadTracker NO_OP_TRACKER = new OverheadTracker() {
+        @Override
+        public void runIfNoOverhead(Runnable runnable) {
+            runnable.run();
+        }
+    };
+
+    OverheadTracker createOverheadTracker() {
+        if (myTargetOverheadPercent >= 100) return NO_OP_TRACKER;
+        if (ourTimer instanceof CoarseTimer) {
+            ((CoarseTimer) ourTimer).initialize();
+        }
+        return new PerThread();
+    }
+
+    private class PerThread implements OverheadTracker {
         private long myLastExecutionTime = ourTimer.nanoTime();
         private long myOverhead = 0;
         private boolean myInProgress = false;
