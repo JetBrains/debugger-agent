@@ -56,7 +56,7 @@ public class ThrottlingTest {
             if (measuredFactor >= targetFactor * OverheadTestUtils.MAX_DETECTED_FACTOR) {
                 Assert.assertNotEquals(0, experimentInfo.skippedInvocations);
             }
-            Assert.assertTrue(message, actualFactorAfterThrottling <= OverheadTestUtils.MAX_DETECTED_FACTOR * targetFactor);
+            Assert.assertTrue(message, actualFactorAfterThrottling <= OverheadTestUtils.THROTTLING_FACTOR * targetFactor);
         } else {
             Assert.assertEquals(0, experimentInfo.skippedInvocations);
         }

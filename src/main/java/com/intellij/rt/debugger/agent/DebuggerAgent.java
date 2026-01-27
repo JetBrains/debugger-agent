@@ -32,6 +32,7 @@ public class DebuggerAgent {
   }
 
   private static void initAll(Instrumentation instrumentation, Properties properties) {
+    CaptureStorage.init(properties);
     initSharedFlowTransformer(instrumentation);
     CaptureAgent.init(properties, instrumentation);
     SuspendHelper.init(properties);

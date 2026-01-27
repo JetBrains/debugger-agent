@@ -1,11 +1,17 @@
 package com.intellij.rt.debugger.agent;
 
+import java.util.Random;
+
 public class OverheadTestUtils {
     public static final long[] PRECISIONS = new long[]{15_600_000, 10_000};
     public static final long[] INVOCATION_TIME_NS = new long[]{1_000_000, 9_700, 2300};
-    static final double TARGET_OVERHEAD = 0.2;
-    static final double MAX_DETECTED_FACTOR = 2.85; // more than 57% should be detected
-    static final double MIN_DETECTED_FACTOR = 0.40; // less than 8% should not be detected
+    static final double TARGET_OVERHEAD = CaptureStorage.DEFAULT_OVERHEAD_PERCENT / 100;
+    static final double MAX_DETECTED_FACTOR = 1.15; // more than 57% should be detected
+    static final double MIN_DETECTED_FACTOR = 0.85; // less than 42% should not be detected
+    static final double THROTTLING_FACTOR = 1.7; // should be able to throttle up to 85%
+
+    // Time simulation works better with random noise
+    private static final double RANDOMNESS = 0.12;
 
     static ThreadLocal<OverheadDetector.OverheadTracker> wrap(final OverheadDetector detector) {
         return new ThreadLocal<OverheadDetector.OverheadTracker>() {
@@ -19,20 +25,22 @@ public class OverheadTestUtils {
     static ExperimentInfo runExperiment(final ExperimentConfig config, double measuredPayloadPercent) {
         final long tokens = config.singleInvocationNs;
         double multiplier = 100 / measuredPayloadPercent - 1;
-        long externalTokens = Math.round(tokens * multiplier);
 
         int repeats = config.repeats;
         final int[] calls = new int[1];
+        final Random random = new Random(42);
 
         for (int i = 0; i < repeats; i++) {
+            final double randomMultiplier = random.nextDouble() * RANDOMNESS - RANDOMNESS / 2;
+            final double adjustedTokens = tokens * (1 + randomMultiplier);
             config.overheadTracker.get().runIfNoOverhead(new Runnable() {
                 @Override
                 public void run() {
                     calls[0]++;
-                    config.timer.advance(tokens);
+                    config.timer.advance(Math.round(adjustedTokens));
                 }
             });
-            config.timer.advance(externalTokens);
+            config.timer.advance(Math.round(adjustedTokens * multiplier));
         }
 
         ExperimentInfo experimentInfo = new ExperimentInfo();

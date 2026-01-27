@@ -31,9 +31,18 @@ public final class CaptureStorage {
           System.getProperty("debugger.async.stack.trace.for.all.threads", "false")
   );
 
-  private static final OverheadDetector ourOverheadDetector = new OverheadDetector(Double.parseDouble(
-          System.getProperty("debugger.agent.overhead.percent", "20")
-  ));
+  static final double DEFAULT_OVERHEAD_PERCENT = 50;
+  private static OverheadDetector ourOverheadDetector = new OverheadDetector(DEFAULT_OVERHEAD_PERCENT);
+
+  static void init(Properties properties) {
+    String overheadPercent = properties.getProperty("overheadPercent");
+    if (overheadPercent == null) return;
+
+    double overhead = Double.parseDouble(overheadPercent);
+    if (Math.abs(overhead - DEFAULT_OVERHEAD_PERCENT) > 0.01) {
+      ourOverheadDetector = new OverheadDetector(overhead);
+    }
+  }
 
   static class ThreadLocalContext {
     final OverheadDetector.OverheadTracker overheadTracker = ourOverheadDetector.createOverheadTracker();
