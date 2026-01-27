@@ -92,11 +92,7 @@ public class OverheadDetector {
         }
     }
 
-    // While set to be 10 microseconds, it could be much more on different systems:
-    // 50-60 us on linux
-    // 10-50 us on macOS
-    // 1000+ us on Windows
-    private Timer ourTimer = new CoarseTimer(TimeUnit.MICROSECONDS.toNanos(10));
+    private Timer ourTimer = new CoarseTimer(TimeUnit.MICROSECONDS.toNanos(100));
 
     // For testing purposes only
     void setTimer(Timer timer) {

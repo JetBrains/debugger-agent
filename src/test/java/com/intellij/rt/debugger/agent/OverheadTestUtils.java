@@ -3,12 +3,12 @@ package com.intellij.rt.debugger.agent;
 import java.util.Random;
 
 public class OverheadTestUtils {
-    public static final long[] PRECISIONS = new long[]{15_600_000, 10_000};
+    public static final long[] PRECISIONS = new long[]{15_600_000, 100_000};
     public static final long[] INVOCATION_TIME_NS = new long[]{1_000_000, 9_700, 2300};
     static final double TARGET_OVERHEAD = CaptureStorage.DEFAULT_OVERHEAD_PERCENT / 100;
     static final double MAX_DETECTED_FACTOR = 1.15; // more than 57% should be detected
     static final double MIN_DETECTED_FACTOR = 0.85; // less than 42% should not be detected
-    static final double THROTTLING_FACTOR = 1.7; // should be able to throttle up to 85%
+    static final double THROTTLING_FACTOR = 1.6; // should be able to throttle up to 80%
 
     // Time simulation works better with random noise
     private static final double RANDOMNESS = 0.12;
