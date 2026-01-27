@@ -64,7 +64,7 @@ public class CollectionBreakpointInstrumentor {
 
   private static Instrumentation ourInstrumentation;
 
-  static {
+  private static void initializeKnownMethods() {
     KnownMethodsSet collectionKnownMethods = new KnownMethodsSet();
     collectionKnownMethods.add(new ImmutableMethod("size()I"));
     collectionKnownMethods.add(new ImmutableMethod("contains(Ljava/lang/Object;)Z"));
@@ -118,7 +118,11 @@ public class CollectionBreakpointInstrumentor {
     myKnownMethods.put(MAP_TYPE, mapKnownMethods);
   }
 
-  public static void init(Instrumentation instrumentation) {
+  public static void init(Properties properties, Instrumentation instrumentation) {
+    boolean enabled = Boolean.parseBoolean(properties.getProperty("collectionBreakpoints", "false"));
+    if (!enabled) return;
+
+    initializeKnownMethods();
     ourInstrumentation = instrumentation;
     ourInstrumentation.addTransformer(new CollectionBreakpointTransformer(), true);
 

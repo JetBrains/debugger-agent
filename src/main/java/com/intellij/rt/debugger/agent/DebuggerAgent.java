@@ -36,7 +36,7 @@ public class DebuggerAgent {
     initSharedFlowTransformer(instrumentation);
     CaptureAgent.init(properties, instrumentation);
     SuspendHelper.init(properties);
-    CollectionBreakpointInstrumentor.init(instrumentation);
+    CollectionBreakpointInstrumentor.init(properties, instrumentation);
     SpilledVariablesTransformer.init(instrumentation);
     TailCallContinuationTransformer.init(instrumentation);
     LogCaptureTransformer.init(instrumentation);
