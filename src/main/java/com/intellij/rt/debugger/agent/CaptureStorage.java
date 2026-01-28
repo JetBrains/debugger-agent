@@ -353,8 +353,9 @@ public final class CaptureStorage {
   }
 
   private static CapturedStack createCapturedStack(Throwable exception, CapturedStack insertMatch) {
+    ExceptionCapturedStack exceptionStack = new ExceptionCapturedStack(exception);
     if (insertMatch != null) {
-      CapturedStack stack = new DeepCapturedStack(exception, insertMatch);
+      CapturedStack stack = new DeepCapturedStack(exceptionStack, insertMatch);
       if (stack.getRecursionDepth() > 100) {
         ArrayList<StackTraceElement> trace = getStackTrace(stack, 500);
         trace.trimToSize();
@@ -362,7 +363,7 @@ public final class CaptureStorage {
       }
       return stack;
     }
-    return new ExceptionCapturedStack(exception);
+    return exceptionStack;
   }
 
   private interface CapturedStack {
@@ -406,19 +407,29 @@ public final class CaptureStorage {
     }
   }
 
-  private static class DeepCapturedStack extends ExceptionCapturedStack {
-    final CapturedStack myInsertMatch;
-    final int myRecursionDepth;
+  private static class DeepCapturedStack implements CapturedStack {
+    private final CapturedStack myCurrent;
+    private final CapturedStack myPrevious;
+    private final int myRecursionDepth;
 
-    DeepCapturedStack(Throwable exception, CapturedStack insertMatch) {
-      super(exception);
-      myInsertMatch = insertMatch;
-      myRecursionDepth = insertMatch.getRecursionDepth() + 1;
+    DeepCapturedStack(CapturedStack stack, CapturedStack previous) {
+      myCurrent = stack;
+      myPrevious = previous;
+      myRecursionDepth = previous.getRecursionDepth() + 1;
+    }
+
+    @Override
+    public List<StackTraceElement> getStackTrace() {
+      return myCurrent.getStackTrace();
     }
 
     @Override
     public int getRecursionDepth() {
       return myRecursionDepth;
+    }
+
+    public CapturedStack getPrevious() {
+      return myPrevious;
     }
   }
 
@@ -555,6 +566,7 @@ public final class CaptureStorage {
     while (stack != null && res.size() <= limit) {
       List<StackTraceElement> stackTrace = trimInitAgentFrames(stack.getStackTrace());
       if (stack instanceof DeepCapturedStack) {
+        DeepCapturedStack deepStack = (DeepCapturedStack) stack;
         int size = stackTrace.size();
         int newEnd = Integer.MAX_VALUE;
         for (int i = 0; i < size; i++) {
@@ -573,7 +585,7 @@ public final class CaptureStorage {
         }
         else {
           stackTrace = stackTrace.subList(0, newEnd);
-          stack = ((DeepCapturedStack)stack).myInsertMatch;
+          stack = deepStack.getPrevious();
         }
       }
       else {
