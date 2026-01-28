@@ -17,8 +17,11 @@ import java.util.concurrent.locks.LockSupport;
  */
 // DO NOT CHANGE SIGNATURE: used from debugger
 public class OverheadDetector {
-    // DO NOT CHANGE SIGNATURE: set from debugger
-    volatile boolean throttleWhenOverhead = false;
+    // Previously used by debugger to control throttling behavior.
+    // Published in several nightly builds, can be removed in the next major release.
+    @SuppressWarnings({"unused", "FieldMayBeFinal"})
+    private boolean throttleWhenOverhead = false;
+
     private final AtomicBoolean myFirstOverheadDetected = new AtomicBoolean(false);
 
     // Approximately 537ms.
@@ -32,10 +35,12 @@ public class OverheadDetector {
      */
     private final long MAX_OVERHEAD_NS;
     private final double myTargetOverheadPercent;
+    private final boolean myThrottlingEnabled;
 
-    public OverheadDetector(double targetOverheadPercent) {
+    public OverheadDetector(double targetOverheadPercent, boolean throttlingEnabled) {
         MAX_OVERHEAD_NS = Math.round(targetOverheadPercent * PERIOD_NS / 100);
         myTargetOverheadPercent = targetOverheadPercent;
+        myThrottlingEnabled = throttlingEnabled;
     }
 
     void onOverheadDetected() {
@@ -100,13 +105,17 @@ public class OverheadDetector {
     }
 
     interface OverheadTracker {
-        void runIfNoOverhead(Runnable runnable);
+        /**
+         * @return {@code true} if the runnable was executed, {@code false} if it was skipped due to overhead.
+         */
+        boolean runIfNoOverhead(Runnable runnable);
     }
 
     private static final OverheadTracker NO_OP_TRACKER = new OverheadTracker() {
         @Override
-        public void runIfNoOverhead(Runnable runnable) {
+        public boolean runIfNoOverhead(Runnable runnable) {
             runnable.run();
+            return true;
         }
     };
 
@@ -122,18 +131,17 @@ public class OverheadDetector {
         private long myLastExecutionTime = ourTimer.nanoTime();
         private long myOverhead = 0;
         private boolean myInProgress = false;
-        private boolean myLocalThrottleWhenOverhead = throttleWhenOverhead;
         private boolean myLocalFirstOverheadDetected = myFirstOverheadDetected.get();
 
         /**
          * Runs the provided runnable if there is no overhead detected or throttling is disabled.
          * The execution of the runnable is not guaranteed.
          */
-        public void runIfNoOverhead(Runnable runnable) {
+        public boolean runIfNoOverhead(Runnable runnable) {
             // do nothing in recursive calls
             if (myInProgress) {
                 runnable.run();
-                return;
+                return true;
             }
 
             long startTime = ourTimer.nanoTime();
@@ -141,8 +149,8 @@ public class OverheadDetector {
 
             if (overheadDetected()) {
                 notifyOverheadDetected();
-                if (isThrottlingEnabled()) {
-                    return;
+                if (myThrottlingEnabled) {
+                    return false;
                 }
             }
 
@@ -157,6 +165,7 @@ public class OverheadDetector {
                 myOverhead = Math.min(2 * MAX_OVERHEAD_NS, myOverhead + elapsedTime);
                 myInProgress = false;
             }
+            return true;
         }
 
         private boolean overheadDetected() {
@@ -168,16 +177,6 @@ public class OverheadDetector {
             if (myLocalFirstOverheadDetected) return;
             myLocalFirstOverheadDetected = true;
             onOverheadDetected();
-        }
-
-        private boolean isThrottlingEnabled() {
-            if (myLocalThrottleWhenOverhead) return true;
-
-            boolean enabled = throttleWhenOverhead;
-            if (enabled) {
-                myLocalThrottleWhenOverhead = true;
-            }
-            return enabled;
         }
 
         /**
