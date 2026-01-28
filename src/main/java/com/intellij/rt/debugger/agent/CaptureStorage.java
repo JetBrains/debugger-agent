@@ -75,6 +75,8 @@ public final class CaptureStorage {
 
   static final StackTraceElement ASYNC_STACK_ELEMENT =
           new StackTraceElement("--- Async", "Stack.Trace --- ", "captured by IntelliJ IDEA debugger", -1);
+  static final StackTraceElement THROTTLED_STACK_ELEMENT =
+          new StackTraceElement("< Unknown", "Stack > ", "was not captured due to throttling", -1);
 
   //// METHODS CALLED FROM THE USER PROCESS
 
@@ -83,7 +85,8 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
+    ThreadLocalContext context = CURRENT_CONTEXT.get();
+    boolean executed = runWithOverheadTrackingAndWithoutThrowableCapture(context, new Runnable() {
       @Override
       public void run() {
         try {
@@ -95,6 +98,22 @@ public final class CaptureStorage {
         }
         // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
         catch (AssertionError | Exception e) {
+          handleException(e);
+        }
+      }
+    });
+    if (executed) return;
+    // Overhead detected, add marker stack
+    runWithoutThrowableCapture(context, new Runnable() {
+      @Override
+      public void run() {
+        try {
+          if (DEBUG) {
+            System.out.println("captureGeneral (throttled) " + getCallerDescriptorForLogging() + " - " + getKeyText(key));
+          }
+          // skip previously captured stacks to minimize overhead
+          STORAGE_GENERAL.put(key, ThrottledCapturedStack.INSTANCE);
+        } catch (AssertionError | Exception e) {
           handleException(e);
         }
       }
@@ -645,5 +664,26 @@ public final class CaptureStorage {
     } catch (RuntimeException ignored) {
     }
     return res;
+  }
+
+  private static class ThrottledCapturedStack implements CapturedStack {
+
+    public static final ThrottledCapturedStack INSTANCE = new ThrottledCapturedStack();
+
+    private static final List<StackTraceElement> STACK_TRACE_ELEMENTS = Collections.singletonList(THROTTLED_STACK_ELEMENT);
+
+
+    private ThrottledCapturedStack() {
+    }
+
+    @Override
+    public List<StackTraceElement> getStackTrace() {
+      return STACK_TRACE_ELEMENTS;
+    }
+
+    @Override
+    public int getRecursionDepth() {
+      return 0;
+    }
   }
 }
