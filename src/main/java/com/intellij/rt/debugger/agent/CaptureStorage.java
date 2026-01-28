@@ -396,12 +396,29 @@ public final class CaptureStorage {
     return exceptionStack;
   }
 
-  private interface CapturedStack {
-    List<StackTraceElement> getStackTrace();
-    int getRecursionDepth();
+  private static class StackData {
+    public final List<StackTraceElement> stackTrace;
+    public final CapturedStack previous;
+
+    private StackData(List<StackTraceElement> stackTrace, CapturedStack previous) {
+      this.stackTrace = stackTrace;
+      this.previous = previous;
+    }
   }
 
-  private static class UnwindCapturedStack implements CapturedStack {
+  private static abstract class CapturedStack {
+    abstract List<StackTraceElement> getStackTrace();
+
+    int getRecursionDepth() {
+      return 0;
+    }
+
+    StackData collectStacks(List<StackTraceElement> stackTrace) {
+      return new StackData(stackTrace, null);
+    }
+  }
+
+  private static class UnwindCapturedStack extends CapturedStack {
     final List<StackTraceElement> myStackTraceElements;
 
     UnwindCapturedStack(List<StackTraceElement> elements) {
@@ -412,14 +429,9 @@ public final class CaptureStorage {
     public List<StackTraceElement> getStackTrace() {
       return myStackTraceElements;
     }
-
-    @Override
-    public int getRecursionDepth() {
-      return 0;
-    }
   }
 
-  private static class ExceptionCapturedStack implements CapturedStack {
+  private static class ExceptionCapturedStack extends CapturedStack {
     final Throwable myException;
 
     private ExceptionCapturedStack(Throwable exception) {
@@ -430,14 +442,9 @@ public final class CaptureStorage {
     public List<StackTraceElement> getStackTrace() {
       return Arrays.asList(myException.getStackTrace());
     }
-
-    @Override
-    public int getRecursionDepth() {
-      return 0;
-    }
   }
 
-  private static class DeepCapturedStack implements CapturedStack {
+  private static class DeepCapturedStack extends CapturedStack {
     private final CapturedStack myCurrent;
     private final CapturedStack myPrevious;
     private final int myRecursionDepth;
@@ -458,8 +465,26 @@ public final class CaptureStorage {
       return myRecursionDepth;
     }
 
-    public CapturedStack getPrevious() {
-      return myPrevious;
+    @Override
+    StackData collectStacks(List<StackTraceElement> stackTrace) {
+      int size = stackTrace.size();
+      int newEnd = Integer.MAX_VALUE;
+      for (int i = 0; i < size; i++) {
+        StackTraceElement elem = stackTrace.get(i);
+        if (elem.getMethodName().endsWith(GENERATED_INSERT_METHOD_POSTFIX)) {
+          // End stack trace like this: ..., "foo$$$capture", "foo"
+          newEnd = i + 2;
+          break;
+        } else if (elem == ASYNC_STACK_ELEMENT) {
+          newEnd = i;
+          break;
+        }
+      }
+      if (newEnd > size) {
+        return new StackData(stackTrace, null); // Insertion point was not found - stop
+      } else {
+        return new StackData(stackTrace.subList(0, newEnd), myPrevious);
+      }
     }
   }
 
@@ -594,34 +619,10 @@ public final class CaptureStorage {
   private static ArrayList<StackTraceElement> getStackTrace(CapturedStack stack, int limit) {
     ArrayList<StackTraceElement> res = new ArrayList<>();
     while (stack != null && res.size() <= limit) {
-      List<StackTraceElement> stackTrace = trimInitAgentFrames(stack.getStackTrace());
-      if (stack instanceof DeepCapturedStack) {
-        DeepCapturedStack deepStack = (DeepCapturedStack) stack;
-        int size = stackTrace.size();
-        int newEnd = Integer.MAX_VALUE;
-        for (int i = 0; i < size; i++) {
-          StackTraceElement elem = stackTrace.get(i);
-          if (elem.getMethodName().endsWith(GENERATED_INSERT_METHOD_POSTFIX)) {
-            // End stack trace like this: ..., "foo$$$capture", "foo"
-            newEnd = i + 2;
-            break;
-          } else if (elem == ASYNC_STACK_ELEMENT) {
-            newEnd = i;
-            break;
-          }
-        }
-        if (newEnd > size) {
-          stack = null; // Insertion point was not found - stop
-        }
-        else {
-          stackTrace = stackTrace.subList(0, newEnd);
-          stack = deepStack.getPrevious();
-        }
-      }
-      else {
-        stack = null;
-      }
-      res.addAll(stackTrace);
+      List<StackTraceElement> filteredStacks = trimInitAgentFrames(stack.getStackTrace());
+      StackData stackData = stack.collectStacks(filteredStacks);
+      res.addAll(stackData.stackTrace);
+      stack = stackData.previous;
       if (stack != null) {
         res.add(ASYNC_STACK_ELEMENT);
       }
@@ -666,7 +667,7 @@ public final class CaptureStorage {
     return res;
   }
 
-  private static class ThrottledCapturedStack implements CapturedStack {
+  private static class ThrottledCapturedStack extends CapturedStack {
 
     public static final ThrottledCapturedStack INSTANCE = new ThrottledCapturedStack();
 
@@ -679,11 +680,6 @@ public final class CaptureStorage {
     @Override
     public List<StackTraceElement> getStackTrace() {
       return STACK_TRACE_ELEMENTS;
-    }
-
-    @Override
-    public int getRecursionDepth() {
-      return 0;
     }
   }
 }
