@@ -107,7 +107,7 @@ public final class CaptureStorage {
     if (!ENABLED || context.throwableCaptureDisabled) {
       return;
     }
-    runWithOverheadTrackingAndWithoutThrowableCapture(context, new Runnable() {
+    runWithoutThrowableCapture(context, new Runnable() {
       @Override
       public void run() {
         // TODO: support coroutine stack traces
@@ -136,7 +136,7 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
+    runWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
       @Override
       public void run() {
         try {
@@ -160,7 +160,7 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    runWithOverheadTrackingAndWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
+    runWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
       @Override
       public void run() {
         try {
@@ -246,6 +246,17 @@ public final class CaptureStorage {
     context.throwableCaptureDisabled = true;
     try {
       return context.overheadTracker.runIfNoOverhead(runnable);
+    } finally {
+      context.throwableCaptureDisabled = oldValue;
+    }
+  }
+
+  private static void runWithoutThrowableCapture(ThreadLocalContext context, final Runnable runnable) {
+    // It's better to disable throwable instrumentation inside our own code for ease of debugging.
+    boolean oldValue = context.throwableCaptureDisabled;
+    context.throwableCaptureDisabled = true;
+    try {
+      runnable.run();
     } finally {
       context.throwableCaptureDisabled = oldValue;
     }
