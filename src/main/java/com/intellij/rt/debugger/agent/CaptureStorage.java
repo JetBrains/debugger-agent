@@ -32,16 +32,15 @@ public final class CaptureStorage {
   );
 
   static final double DEFAULT_OVERHEAD_PERCENT = 50;
-  private static OverheadDetector ourOverheadDetector = new OverheadDetector(DEFAULT_OVERHEAD_PERCENT);
+  private static OverheadDetector ourOverheadDetector = new OverheadDetector(DEFAULT_OVERHEAD_PERCENT, true);
 
   static void init(Properties properties) {
     String overheadPercent = properties.getProperty("overheadPercent");
-    if (overheadPercent == null) return;
+    String throttlingValue = properties.getProperty("throttling");
 
-    double overhead = Double.parseDouble(overheadPercent);
-    if (Math.abs(overhead - DEFAULT_OVERHEAD_PERCENT) > 0.01) {
-      ourOverheadDetector = new OverheadDetector(overhead);
-    }
+    double overhead = overheadPercent != null ? Double.parseDouble(overheadPercent) : DEFAULT_OVERHEAD_PERCENT;
+    boolean throttlingEnabled = throttlingValue == null || Boolean.parseBoolean(throttlingValue);
+    ourOverheadDetector = new OverheadDetector(overhead, throttlingEnabled);
   }
 
   static class ThreadLocalContext {
@@ -241,12 +240,12 @@ public final class CaptureStorage {
     T call();
   }
 
-  private static void runWithOverheadTrackingAndWithoutThrowableCapture(ThreadLocalContext context, final Runnable runnable) {
+  private static boolean runWithOverheadTrackingAndWithoutThrowableCapture(ThreadLocalContext context, final Runnable runnable) {
   // It's better to disable throwable instrumentation inside our own code for ease of debugging.
     boolean oldValue = context.throwableCaptureDisabled;
     context.throwableCaptureDisabled = true;
     try {
-      context.overheadTracker.runIfNoOverhead(runnable);
+      return context.overheadTracker.runIfNoOverhead(runnable);
     } finally {
       context.throwableCaptureDisabled = oldValue;
     }

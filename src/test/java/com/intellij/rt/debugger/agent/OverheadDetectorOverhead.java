@@ -6,8 +6,7 @@ import java.util.concurrent.TimeUnit;
 
 public class OverheadDetectorOverhead {
     private static void measureOverhead(boolean throttlingEnabled) {
-        OverheadDetector detector = new OverheadDetector(OverheadTestUtils.TARGET_OVERHEAD * 100);
-        detector.throttleWhenOverhead = throttlingEnabled;
+        OverheadDetector detector = new OverheadDetector(OverheadTestUtils.TARGET_OVERHEAD * 100, throttlingEnabled);
 
         ThreadLocal<OverheadDetector.OverheadTracker> overheadTracker = OverheadTestUtils.wrap(detector);
 

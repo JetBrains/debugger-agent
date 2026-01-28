@@ -27,25 +27,27 @@ public class OverheadTestUtils {
         double multiplier = 100 / measuredPayloadPercent - 1;
 
         int repeats = config.repeats;
-        final int[] calls = new int[1];
+        int calls = 0;
         final Random random = new Random(42);
 
         for (int i = 0; i < repeats; i++) {
             final double randomMultiplier = random.nextDouble() * RANDOMNESS - RANDOMNESS / 2;
             final double adjustedTokens = tokens * (1 + randomMultiplier);
-            config.overheadTracker.get().runIfNoOverhead(new Runnable() {
+            boolean executed = config.overheadTracker.get().runIfNoOverhead(new Runnable() {
                 @Override
                 public void run() {
-                    calls[0]++;
                     config.timer.advance(Math.round(adjustedTokens));
                 }
             });
+            if (executed) {
+                calls++;
+            }
             config.timer.advance(Math.round(adjustedTokens * multiplier));
         }
 
         ExperimentInfo experimentInfo = new ExperimentInfo();
-        experimentInfo.measuredInvocations = calls[0];
-        experimentInfo.skippedInvocations = repeats - calls[0];
+        experimentInfo.measuredInvocations = calls;
+        experimentInfo.skippedInvocations = repeats - calls;
         experimentInfo.nonMeasuredInvocations = (int) (repeats * multiplier);
         return experimentInfo;
     }
@@ -68,8 +70,7 @@ public class OverheadTestUtils {
 
         static ExperimentConfig create(double targetOverheadPercent, boolean throttleWhenOverhead,
                                        long timerPrecisionNs, long singleInvocationNs, int repeats) {
-            OverheadDetector detector = new OverheadDetector(targetOverheadPercent);
-            detector.throttleWhenOverhead = throttleWhenOverhead;
+            OverheadDetector detector = new OverheadDetector(targetOverheadPercent, throttleWhenOverhead);
             return new ExperimentConfig(detector, timerPrecisionNs, singleInvocationNs, repeats);
         }
     }
