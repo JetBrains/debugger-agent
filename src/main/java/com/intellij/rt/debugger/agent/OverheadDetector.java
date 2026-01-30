@@ -9,9 +9,9 @@ import java.util.concurrent.locks.LockSupport;
  * It monitors and tracks task execution times and determines if the system is under significant overhead.
  * It prevents tasks from executing if overhead thresholds are surpassed and throttling is enabled.
  * <p>
- * This algorithm employs a leaky bucket mechanism over a sliding period (PERIOD_NS) to precisely manage overhead,
+ * This algorithm employs a leaky bucket mechanism over a sliding period ({@code PERIOD_NS}) to precisely manage overhead,
  * proportionally restoring budget based on elapsed time for gradual decay and rapid recovery from bursts.
- * It caps overhead accumulation at 2x the max budget to handle one-time spikes without prolonged throttling,
+ * It caps overhead accumulation at {@code RECOVER_PERIODS}x the max budget to handle one-time spikes without prolonged throttling,
  * while a coarse timer minimizes timing costs.
  * Per-thread isolation ensures fair tracking in multithreaded environments.
  */
@@ -29,6 +29,7 @@ public class OverheadDetector {
     // => period should be at least 15.6 / targetOverheadPercent
     // with targetOverheadPercent = 20%, the period should be at least 78ms
     private static final long PERIOD_NS = 1L << 29;
+    private static final int RECOVER_PERIODS = 2;
 
     /**
      * During a single period ({@link #PERIOD_NS}) of time, the overhead is limited to MAX_OVERHEAD_NS.
@@ -161,8 +162,7 @@ public class OverheadDetector {
                 long endTime = ourTimer.nanoTime();
                 long elapsedTime = endTime - startTime;
                 // limit maximum to avoid one-time spikes that hard to restore from
-                // can overflow a little, but restores in 2 full periods
-                myOverhead = Math.min(2 * MAX_OVERHEAD_NS, myOverhead + elapsedTime);
+                myOverhead = Math.min(RECOVER_PERIODS * MAX_OVERHEAD_NS, myOverhead + elapsedTime);
                 myInProgress = false;
             }
             return true;
@@ -187,7 +187,7 @@ public class OverheadDetector {
             myLastExecutionTime = currentTime;
 
             long passedTime = currentTime - lastTime;
-            if (passedTime >= PERIOD_NS) {
+            if (passedTime >= RECOVER_PERIODS * PERIOD_NS) {
                 myOverhead = 0;
             } else {
                 long restored = passedTime * MAX_OVERHEAD_NS / PERIOD_NS;
