@@ -31,7 +31,7 @@ public class LogCaptureStorage {
             if (fd != FD_OUT && fd != FD_ERR) return;
             if (len == 0) return;
 
-            List<StackTraceElement> regularStack = Arrays.asList(Thread.currentThread().getStackTrace());
+            List<StackTraceElement> regularStack = CaptureStorage.getCurrentStackTraceWithoutAgentFrames();
             List<StackTraceElement> capturedStack = CaptureStorage.getCurrentCapturedStack(MAX_STACK_DEPTH - regularStack.size());
 
             String captured;

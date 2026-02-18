@@ -440,7 +440,7 @@ public final class CaptureStorage {
 
     @Override
     public List<StackTraceElement> getStackTrace() {
-      return Arrays.asList(myException.getStackTrace());
+      return trimInitAgentFrames(Arrays.asList(myException.getStackTrace()));
     }
   }
 
@@ -619,7 +619,7 @@ public final class CaptureStorage {
   private static ArrayList<StackTraceElement> getStackTrace(CapturedStack stack, int limit) {
     ArrayList<StackTraceElement> res = new ArrayList<>();
     while (stack != null && res.size() <= limit) {
-      List<StackTraceElement> filteredStacks = trimInitAgentFrames(stack.getStackTrace());
+      List<StackTraceElement> filteredStacks = stack.getStackTrace();
       StackData stackData = stack.collectStacks(filteredStacks);
       res.addAll(stackData.stackTrace);
       stack = stackData.previous;
@@ -645,17 +645,18 @@ public final class CaptureStorage {
     return !elem.getClassName().startsWith(CaptureStorage.class.getPackage().getName());
   }
 
+  static List<StackTraceElement> getCurrentStackTraceWithoutAgentFrames() {
+    // Don't use Thread.currentThread().getStackTrace() because it adds extra frame.
+    return trimInitAgentFrames(Arrays.asList(new Throwable().getStackTrace()));
+  }
+
   /** Expensive method, it should be used only for logging. */
   private static String getCallerDescriptorForLogging() {
-    StackTraceElement[] stackTrace = Thread.currentThread().getStackTrace();
-    // skip the first one -- it's Thread.getStackTrace
-    for (int i = 1; i < stackTrace.length; i++) {
-      StackTraceElement elem = stackTrace[i];
-      if (isNotAgentFrame(elem)) {
-        return elem.getClassName() + "." + elem.getMethodName();
-      }
-    }
-    return "unknown";
+    List<StackTraceElement> stackTrace = getCurrentStackTraceWithoutAgentFrames();
+    if (stackTrace.isEmpty()) return "unknown";
+
+    StackTraceElement elem = stackTrace.get(0);
+    return elem.getClassName() + "." + elem.getMethodName();
   }
 
   private static String getKeyText(Object key) {
