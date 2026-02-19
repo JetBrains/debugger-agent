@@ -608,7 +608,7 @@ public final class CaptureStorage {
   private static List<StackTraceElement> trimInitAgentFrames(List<StackTraceElement> elements) {
     int firstNotAgent = 0;
     for (int i = 0; i < elements.size(); i++) {
-      if (isNotAgentFrame(elements.get(i))) {
+      if (!isAgentFrame(elements.get(i))) {
         firstNotAgent = i;
         break;
       }
@@ -641,8 +641,8 @@ public final class CaptureStorage {
     e.printStackTrace();
   }
 
-  private static boolean isNotAgentFrame(StackTraceElement elem) {
-    return !elem.getClassName().startsWith(CaptureStorage.class.getPackage().getName());
+  static boolean isAgentFrame(StackTraceElement elem) {
+    return elem.getClassName().startsWith(CaptureStorage.class.getPackage().getName());
   }
 
   static List<StackTraceElement> getCurrentStackTraceWithoutAgentFrames() {

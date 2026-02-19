@@ -4,6 +4,7 @@ import org.jetbrains.capture.org.objectweb.asm.*;
 import org.jetbrains.capture.org.objectweb.asm.tree.*;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
@@ -428,29 +429,29 @@ public class InstrumentationBreakpointTransformer {
     @SuppressWarnings("unused")
     public static boolean isUnmutedState;
 
-    public static void instrumentationFailed(Throwable e, int instrumentationId) {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    public static void instrumentationFailed(Throwable exception, int instrumentationId) {
+        try (
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                PrintStream ps = new PrintStream(baos);
+        ) {
+            ps.println(exception);
 
-        PrintStream s = new PrintStream(baos);
-
-        s.println(e);
-
-        StackTraceElement[] trace = e.getStackTrace();
-        int lastToReportIndex = 0;
-        for (int i = 0; i < trace.length; i++) {
-            StackTraceElement traceElement = trace[i];
-            if (traceElement.getClassName().startsWith("com.intellij.rt.debugger.agent")) {
-                lastToReportIndex = i;
+            StackTraceElement[] trace = exception.getStackTrace();
+            int lastToReportIndex = -1;
+            for (int i = 0; i < trace.length; i++) {
+                if (CaptureStorage.isAgentFrame(trace[i])) {
+                    lastToReportIndex = i;
+                }
             }
-        }
-        for (int i = 0; i <= lastToReportIndex; i++) {
-            StackTraceElement traceElement = trace[i];
-            s.println("\tat " + traceElement);
-        }
+            for (int i = 0; i <= lastToReportIndex; i++) {
+                ps.println("\tat " + trace[i]);
+            }
 
-        reportInstrumentationFailed(baos.toString(), instrumentationId);
-
-        s.close();
+            reportInstrumentationFailed(baos.toString(), instrumentationId);
+        } catch (IOException ex) {
+            // Should not happen.
+            reportInstrumentationFailed(exception.toString(), instrumentationId);
+        }
     }
 
     public static String[][] requestInstrumentedInfo(@SuppressWarnings("unused") String className) {
