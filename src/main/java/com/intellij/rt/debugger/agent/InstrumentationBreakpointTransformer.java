@@ -2,6 +2,9 @@ package com.intellij.rt.debugger.agent;
 
 import org.jetbrains.capture.org.objectweb.asm.*;
 import org.jetbrains.capture.org.objectweb.asm.tree.*;
+import org.jetbrains.capture.org.objectweb.asm.tree.analysis.Analyzer;
+import org.jetbrains.capture.org.objectweb.asm.tree.analysis.BasicValue;
+import org.jetbrains.capture.org.objectweb.asm.tree.analysis.BasicVerifier;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -259,6 +262,22 @@ public class InstrumentationBreakpointTransformer {
                 } else {
                     instrumentationFailed(e, -1);
                 }
+                return null;
+            }
+
+            // Verify the result bytecode
+            try {
+                ClassReader cr = new ClassReader(resultBytecode);
+                ClassNode cn = new ClassNode();
+                cr.accept(cn, 0);
+
+                for (MethodNode mn : cn.methods) {
+                    // use Basic verifier to not load any class
+                    Analyzer<BasicValue> a = new Analyzer<>(new BasicVerifier());
+                    a.analyze(cn.name, mn);
+                }
+            } catch (Throwable e) {
+                instrumentationFailed(e, -1);
                 return null;
             }
 
