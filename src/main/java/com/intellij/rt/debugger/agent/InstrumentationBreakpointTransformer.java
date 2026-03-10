@@ -188,7 +188,7 @@ public class InstrumentationBreakpointTransformer {
                                     Label endOfTry = new Label();
                                     Label theEnd = new Label();
 
-                                    //             if (!enterBreakpointCheck()) {
+                                    //             if (!enterBreakpointCheckInternal()) {
                                     // startTry  :     try {
                                     //                     fragmentClassName.fragmentEntryMethodName(arguments)
                                     // catchBlock:     } catch (Throwable e) {
@@ -203,7 +203,7 @@ public class InstrumentationBreakpointTransformer {
 
                                     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
                                             theTransformerClassName,
-                                            "enterBreakpointCheck",
+                                            "enterBreakpointCheckInternal",
                                             "()Z",
                                             false);
 
@@ -412,11 +412,20 @@ public class InstrumentationBreakpointTransformer {
      * @return true if the breakpoint condition/logging should be skipped
      */
     @SuppressWarnings("unused")
-    public static boolean enterBreakpointCheck() {
+    public static boolean enterBreakpointCheckInternal() {
         if (!isUnmutedState) {
             return true;
         }
 
+        return enterBreakpointCheck();
+    }
+
+    /**
+     * This method is used from instrumented code and from IDEA's debugger.
+     *
+     * @return true if the thread is in progress of condition/logging evaluation, so other breakpoints should be skipped.
+     */
+    public static boolean enterBreakpointCheck() {
         Integer previous = myThreadLocal.get();
         if (previous == null) {
             previous = 0;
