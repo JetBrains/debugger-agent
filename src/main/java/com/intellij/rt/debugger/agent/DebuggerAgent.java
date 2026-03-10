@@ -19,7 +19,7 @@ public class DebuggerAgent {
   @SuppressWarnings("unused")
   public final static int BREAKPOINT_INSTRUMENTATION_MIN_VERSION = 1;
   @SuppressWarnings("unused")
-  public final static int BREAKPOINT_INSTRUMENTATION_CURRENT_VERSION = 1;
+  public final static int BREAKPOINT_INSTRUMENTATION_CURRENT_VERSION = 2;
 
   public static void premain(String args, Instrumentation instrumentation) {
     if (DebuggerAgent.class.getClassLoader() != null) {
