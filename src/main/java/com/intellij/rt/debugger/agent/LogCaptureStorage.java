@@ -70,4 +70,8 @@ public class LogCaptureStorage {
     private static void save(String captured) {
     }
 
+    // It's used by the debugger.
+    private static void loggingBreakpointHit(int instrumentationId, String message) {
+    }
+
 }
