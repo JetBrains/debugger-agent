@@ -258,9 +258,9 @@ public class InstrumentationBreakpointTransformer {
                 }, 0, true);
             } catch (Throwable e) {
                 if (e instanceof InstrumentationBpExceptionWrapper) {
-                    instrumentationFailed(e.getCause(), ((InstrumentationBpExceptionWrapper)e).instrumentationId);
+                    instrumentationFailed(e.getCause(), new int[]{((InstrumentationBpExceptionWrapper) e).instrumentationId}, null);
                 } else {
-                    instrumentationFailed(e, -1);
+                    instrumentationFailed(e, getIntArrayFromList(successIds), null);
                 }
                 return null;
             }
@@ -277,16 +277,11 @@ public class InstrumentationBreakpointTransformer {
                     a.analyze(cn.name, mn);
                 }
             } catch (Throwable e) {
-                instrumentationFailed(e, -1);
+                instrumentationFailed(e, getIntArrayFromList(successIds), resultBytecode);
                 return null;
             }
 
-            Integer[] integerArray = successIds.toArray(new Integer[0]);
-
-            int[] intArray = new int[integerArray.length];
-            for (int i = 0; i < integerArray.length; i++) {
-                intArray[i] = integerArray[i];
-            }
+            int[] intArray = getIntArrayFromList(successIds);
 
             successfullyInstrumented(loader, intArray);
 
@@ -457,7 +452,7 @@ public class InstrumentationBreakpointTransformer {
     @SuppressWarnings("unused")
     public static boolean isUnmutedState;
 
-    public static void instrumentationFailed(Throwable exception, int instrumentationId) {
+    public static void instrumentationFailed(Throwable exception, int[] instrumentationIds, byte[] resultBytecode) {
         try (
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 PrintStream ps = new PrintStream(baos);
@@ -475,10 +470,10 @@ public class InstrumentationBreakpointTransformer {
                 ps.println("\tat " + trace[i]);
             }
 
-            reportInstrumentationFailed(baos.toString(), instrumentationId);
+            reportInstrumentationFailed(baos.toString(), instrumentationIds, resultBytecode);
         } catch (IOException ex) {
             // Should not happen.
-            reportInstrumentationFailed(exception.toString(), instrumentationId);
+            reportInstrumentationFailed(exception.toString(), instrumentationIds, resultBytecode);
         }
     }
 
@@ -492,7 +487,7 @@ public class InstrumentationBreakpointTransformer {
     }
 
     @SuppressWarnings("unused")
-    public static void reportInstrumentationFailed(String report, int instrumentationId) {
+    public static void reportInstrumentationFailed(String report, int[] instrumentationIds, byte[] resultBytecode) {
         // The report will be on the IDE side by a special breakpoint
     }
 
@@ -516,5 +511,13 @@ public class InstrumentationBreakpointTransformer {
             return Integer.parseInt(fragmentClassName.substring(i + 1));
         }
         throw new IllegalArgumentException("Fragment class name does not contain a valid instrumentation ID: " + fragmentClassName);
+    }
+
+    private static int[] getIntArrayFromList(List<Integer> successIds) {
+        int[] intArray = new int[successIds.size()];
+        for (int i = 0; i < successIds.size(); i++) {
+            intArray[i] = successIds.get(i);
+        }
+        return intArray;
     }
 }
