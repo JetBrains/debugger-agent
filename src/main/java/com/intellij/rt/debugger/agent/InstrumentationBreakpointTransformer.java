@@ -1,10 +1,12 @@
 package com.intellij.rt.debugger.agent;
 
 import org.jetbrains.capture.org.objectweb.asm.*;
+import org.jetbrains.capture.org.objectweb.asm.commons.LocalVariablesSorter;
 import org.jetbrains.capture.org.objectweb.asm.tree.*;
 import org.jetbrains.capture.org.objectweb.asm.tree.analysis.Analyzer;
 import org.jetbrains.capture.org.objectweb.asm.tree.analysis.BasicValue;
 import org.jetbrains.capture.org.objectweb.asm.tree.analysis.BasicVerifier;
+import org.jetbrains.capture.org.objectweb.asm.tree.analysis.Frame;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -32,6 +34,7 @@ class InstrumentationBreakpointInfo {
     final String fragmentEntryMethodName;
     final String methodSignature;
     final List<String> argumentNames;
+    Type[] stackTypes = new Type[0];
 
     InstrumentationBreakpointInfo(int instrumentationId, int lineNumber, String fragmentClassName, String fragmentEntryMethodName, String methodSignature, List<String> argumentNames) {
         this.instrumentationId = instrumentationId;
@@ -59,6 +62,7 @@ class InstrumentationBreakpointMappingInfo {
 }
 
 public class InstrumentationBreakpointTransformer {
+    static final int BREAKPOINT_TRANSFORM_READER_FLAGS = ClassReader.EXPAND_FRAMES;
     private static final Set<String> myClassesWithBreakpoints = new LinkedHashSet<>();
 
     public static void init(Properties properties, Instrumentation instrumentation) {
@@ -155,13 +159,13 @@ public class InstrumentationBreakpointTransformer {
                             return superMethodVisitor;
                         }
 
-                        final Map<Integer, InstrumentationBreakpointMappingInfo> argumentMapping = collectArgumentMapping(m, lineNumbers);
+                        final Map<Integer, InstrumentationBreakpointMappingInfo> argumentMapping = collectArgumentMapping(classNode.name, m, lineNumbers);
 
                         if (argumentMapping.isEmpty()) {
                             return superMethodVisitor;
                         }
 
-                        return new MethodVisitor(api, superMethodVisitor) {
+                        return new LocalVariablesSorter(api, access, descriptor, superMethodVisitor) {
 
                             @Override
                             public void visitLineNumber(int line, Label start) {
@@ -178,10 +182,12 @@ public class InstrumentationBreakpointTransformer {
                                 String fragmentClassName = argumentMapping.inputInfo.fragmentClassName;
                                 String fragmentEntryMethodName = argumentMapping.inputInfo.fragmentEntryMethodName;
                                 int instrumentationId = argumentMapping.inputInfo.instrumentationId;
+                                Type[] stackTypes = argumentMapping.inputInfo.stackTypes;
 
                                 successIds.add(instrumentationId);
 
                                 try {
+                                    int[] stackLocalIndexes = spillStack(stackTypes);
                                     Label startTry = new Label();
                                     Label endTry = new Label();
                                     Label catchBlock = new Label();
@@ -249,13 +255,31 @@ public class InstrumentationBreakpointTransformer {
                                             "()V",
                                             false);
                                     mv.visitLabel(theEnd);
+                                    restoreStack(stackTypes, stackLocalIndexes);
                                 } catch (Throwable e) {
                                     throw new InstrumentationBpExceptionWrapper(e, instrumentationId);
                                 }
                             }
+
+                            private int[] spillStack(Type[] stackTypes) {
+                                int[] stackLocalIndexes = new int[stackTypes.length];
+                                for (int i = 0; i < stackTypes.length; i++) {
+                                    stackLocalIndexes[i] = newLocal(stackTypes[i]);
+                                }
+                                for (int i = stackTypes.length - 1; i >= 0; i--) {
+                                    mv.visitVarInsn(stackTypes[i].getOpcode(Opcodes.ISTORE), stackLocalIndexes[i]);
+                                }
+                                return stackLocalIndexes;
+                            }
+
+                            private void restoreStack(Type[] stackTypes, int[] stackLocalIndexes) {
+                                for (int i = 0; i < stackTypes.length; i++) {
+                                    mv.visitVarInsn(stackTypes[i].getOpcode(Opcodes.ILOAD), stackLocalIndexes[i]);
+                                }
+                            }
                         };
                     }
-                }, 0, true);
+                }, BREAKPOINT_TRANSFORM_READER_FLAGS, true);
             } catch (Throwable e) {
                 if (e instanceof InstrumentationBpExceptionWrapper) {
                     instrumentationFailed(e.getCause(), new int[]{((InstrumentationBpExceptionWrapper) e).instrumentationId}, null);
@@ -289,8 +313,9 @@ public class InstrumentationBreakpointTransformer {
         }
     }
 
-    private static Map<Integer, InstrumentationBreakpointMappingInfo> collectArgumentMapping(MethodNode method, Map<Integer, InstrumentationBreakpointInfo> lineNumbers) {
+    private static Map<Integer, InstrumentationBreakpointMappingInfo> collectArgumentMapping(String owner, MethodNode method, Map<Integer, InstrumentationBreakpointInfo> lineNumbers) {
         final Map<Integer, InstrumentationBreakpointMappingInfo> remappingInfo = new HashMap<>();
+        Frame<BasicValue>[] frames = analyzeMethodFrames(owner, method);
 
         Map<Integer, Integer> visitedLineNumbers = new HashMap<>();
 
@@ -328,6 +353,13 @@ public class InstrumentationBreakpointTransformer {
                     remappingInfo.remove(lineNumber);
                 }
                 else {
+                    Type[] stackTypes = collectStackTypes(method, frames, instructionIndex, instrumentationBreakpointInfo);
+                    if (stackTypes == null) {
+                        remappingInfo.remove(lineNumber);
+                        continue;
+                    }
+                    instrumentationBreakpointInfo.stackTypes = stackTypes;
+
                     List<ArgumentGetter> argumentLoadGenerators = new ArrayList<>();
                     for (String argumentName : instrumentationBreakpointInfo.argumentNames) {
                         boolean isFound = false;
@@ -365,6 +397,76 @@ public class InstrumentationBreakpointTransformer {
         }
 
         return remappingInfo;
+    }
+
+    private static Frame<BasicValue>[] analyzeMethodFrames(String owner, MethodNode method) {
+        Analyzer<BasicValue> analyzer = new Analyzer<>(new BasicVerifier());
+        try {
+            return analyzer.analyze(owner, method);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private static Type[] collectStackTypes(MethodNode method, Frame<BasicValue>[] frames, int instructionIndex, InstrumentationBreakpointInfo instrumentationBreakpointInfo) {
+        Frame<BasicValue> frame = getFrameForInstrumentation(method, frames, instructionIndex);
+        if (frame == null) {
+            impossibleToInstrument("Cannot determine operand stack at line " + instrumentationBreakpointInfo.lineNumber, instrumentationBreakpointInfo.instrumentationId);
+            return null;
+        }
+
+        Type[] stackTypes = new Type[frame.getStackSize()];
+        for (int i = 0; i < stackTypes.length; i++) {
+            try {
+                stackTypes[i] = getSpillType(frame.getStack(i));
+            } catch (IllegalArgumentException e) {
+                impossibleToInstrument(e.getMessage(), instrumentationBreakpointInfo.instrumentationId);
+                return null;
+            }
+        }
+        return stackTypes;
+    }
+
+    private static Frame<BasicValue> getFrameForInstrumentation(MethodNode method, Frame<BasicValue>[] frames, int instructionIndex) {
+        Frame<BasicValue> frame = frames[instructionIndex];
+        if (frame != null) {
+            return frame;
+        }
+
+        for (int i = instructionIndex + 1; i < method.instructions.size(); i++) {
+            if (method.instructions.get(i).getOpcode() >= 0) {
+                return frames[i];
+            }
+        }
+
+        return null;
+    }
+
+    private static Type getSpillType(BasicValue value) {
+        Type type = value.getType();
+        if (type == null) {
+            return Type.getObjectType("java/lang/Object");
+        }
+
+        switch (type.getSort()) {
+            case Type.BOOLEAN:
+            case Type.BYTE:
+            case Type.CHAR:
+            case Type.SHORT:
+            case Type.INT:
+                return Type.INT_TYPE;
+            case Type.FLOAT:
+                return Type.FLOAT_TYPE;
+            case Type.LONG:
+                return Type.LONG_TYPE;
+            case Type.DOUBLE:
+                return Type.DOUBLE_TYPE;
+            case Type.ARRAY:
+            case Type.OBJECT:
+                return type;
+            default:
+                throw new IllegalArgumentException("Unsupported operand stack value");
+        }
     }
 
     private static Map<Integer, InstrumentationBreakpointInfo> getLineNumbers(String methodName, Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods) {
