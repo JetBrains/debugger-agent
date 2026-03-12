@@ -4,7 +4,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.FileDescriptor;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 import java.util.List;
 
 public class LogCaptureStorage {
@@ -47,7 +46,7 @@ public class LogCaptureStorage {
                 captured = bas.toString(StandardCharsets.ISO_8859_1.name());
             }
 
-            save(captured);
+            outputWritten(captured);
 
         } catch (Exception e) {
             handleException(e);
@@ -67,7 +66,8 @@ public class LogCaptureStorage {
     }
 
     // It's used by the debugger.
-    private static void save(String captured) {
+    @SuppressWarnings("unused")
+    private static void outputWritten(String captured) {
     }
 
     // It's used by the debugger and instrumentation.
