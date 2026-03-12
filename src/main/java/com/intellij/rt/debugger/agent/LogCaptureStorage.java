@@ -70,8 +70,9 @@ public class LogCaptureStorage {
     private static void save(String captured) {
     }
 
-    // It's used by the debugger.
-    private static void loggingBreakpointHit(int instrumentationId, String message) {
+    // It's used by the debugger and instrumentation.
+    @SuppressWarnings("unused")
+    public static void loggingBreakpointHit(int instrumentationId, String message) {
     }
 
 }
