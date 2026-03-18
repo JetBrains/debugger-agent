@@ -5,6 +5,7 @@ import java.io.DataOutputStream;
 import java.io.FileDescriptor;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class LogCaptureStorage {
@@ -82,18 +83,10 @@ public class LogCaptureStorage {
                     }
                 }
             } else {
-                String batched;
-                try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
-                     DataOutputStream dos = new DataOutputStream(bas)) {
-                    dos.writeInt(1);
-                    dos.writeInt(captured.length);
-                    dos.write(captured);
-                    batched = bas.toString(StandardCharsets.ISO_8859_1.name());
-                } catch (Exception e) {
-                    handleException(e);
-                    return;
+                String batched = encodeBatchedData(Collections.singletonList(captured));
+                if (batched != null) {
+                    outputWritten(batched);
                 }
-                outputWritten(batched);
             }
 
         } catch (Exception e) {
@@ -116,23 +109,31 @@ public class LogCaptureStorage {
     private static void flush() {
         String batched;
         synchronized (LogCaptureStorage.class) {
-            if (BATCHED_OUTPUT.isEmpty()) return;
-            try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
-                 DataOutputStream dos = new DataOutputStream(bas)) {
-                dos.writeInt(BATCHED_OUTPUT.size());
-                for (byte[] bytes : BATCHED_OUTPUT) {
-                    dos.writeInt(bytes.length);
-                    dos.write(bytes);
-                }
-                batched = bas.toString(StandardCharsets.ISO_8859_1.name());
-            } catch (Exception e) {
-                handleException(e);
-                return;
-            }
-            BATCHED_OUTPUT.clear();
+            List<byte[]> batchedData = BATCHED_OUTPUT;
+            batched = encodeBatchedData(batchedData);
+            if (batched == null) return;
+            batchedData.clear();
             BATCH_SIZE = 0;
         }
         outputWritten(batched);
+    }
+
+    private static String encodeBatchedData(List<byte[]> batchedData) {
+        String batched;
+        if (batchedData.isEmpty()) return null;
+        try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
+             DataOutputStream dos = new DataOutputStream(bas)) {
+            dos.writeInt(batchedData.size());
+            for (byte[] bytes : batchedData) {
+                dos.writeInt(bytes.length);
+                dos.write(bytes);
+            }
+            batched = bas.toString(StandardCharsets.ISO_8859_1.name());
+        } catch (Exception e) {
+            handleException(e);
+            return null;
+        }
+        return batched;
     }
 
     // It's used by the debugger.
