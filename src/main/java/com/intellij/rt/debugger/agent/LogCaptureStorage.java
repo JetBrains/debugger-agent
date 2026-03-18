@@ -4,6 +4,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.FileDescriptor;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 public class LogCaptureStorage {
@@ -13,6 +14,11 @@ public class LogCaptureStorage {
     // To prevent capturing during capturing.
     private static boolean CAPTURING;
 
+    private static boolean BATCHING_ENABLED;
+    private static final long MAX_BATCH_SIZE = 1024 * 1024; // 1MB
+    private static long BATCH_SIZE = 0;
+    private static final List<byte[]> BATCHED_OUTPUT = new ArrayList<>();
+
     private static final FileDescriptor FD_OUT = FileDescriptor.out;
     private static final FileDescriptor FD_ERR = FileDescriptor.err;
 
@@ -20,6 +26,27 @@ public class LogCaptureStorage {
 
     public static boolean init() {
         ENABLED = true;
+        BATCHING_ENABLED = SuspendHelper.addPeriodicListener(new Runnable() {
+            @Override
+            public void run() {
+                if (!BATCHING_ENABLED) return;
+                try {
+                    flush();
+                } catch (Throwable e) {
+                    BATCHING_ENABLED = false;
+                    System.err.println("Error while flushing log capture:");
+                    e.printStackTrace(System.err);
+                }
+            }
+        });
+        if (BATCHING_ENABLED) {
+            Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    flush();
+                }
+            }));
+        }
         return true;
     }
 
@@ -33,7 +60,7 @@ public class LogCaptureStorage {
             List<StackTraceElement> regularStack = CaptureStorage.getCurrentStackTraceWithoutAgentFrames();
             List<StackTraceElement> capturedStack = CaptureStorage.getCurrentCapturedStack(MAX_STACK_DEPTH - regularStack.size());
 
-            String captured;
+            byte[] captured;
             try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
                  DataOutputStream dos = new DataOutputStream(bas)) {
                 dos.writeInt(len);
@@ -43,10 +70,31 @@ public class LogCaptureStorage {
                     CaptureStorage.writeAsyncStackTraceElementToStream(CaptureStorage.ASYNC_STACK_ELEMENT, dos);
                     CaptureStorage.writeAsyncStackTraceToStream(capturedStack, dos);
                 }
-                captured = bas.toString(StandardCharsets.ISO_8859_1.name());
+                captured = bas.toByteArray();
             }
 
-            outputWritten(captured);
+            if (BATCHING_ENABLED) {
+                synchronized (LogCaptureStorage.class) {
+                    BATCHED_OUTPUT.add(captured);
+                    BATCH_SIZE += captured.length;
+                    if (BATCH_SIZE > MAX_BATCH_SIZE) {
+                        flush();
+                    }
+                }
+            } else {
+                String batched;
+                try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
+                     DataOutputStream dos = new DataOutputStream(bas)) {
+                    dos.writeInt(1);
+                    dos.writeInt(captured.length);
+                    dos.write(captured);
+                    batched = bas.toString(StandardCharsets.ISO_8859_1.name());
+                } catch (Exception e) {
+                    handleException(e);
+                    return;
+                }
+                outputWritten(batched);
+            }
 
         } catch (Exception e) {
             handleException(e);
@@ -63,6 +111,28 @@ public class LogCaptureStorage {
         ENABLED = false;
         System.err.println("Debugger agent, log capture: cannot capture logging");
         e.printStackTrace(System.err);
+    }
+
+    private static void flush() {
+        String batched;
+        synchronized (LogCaptureStorage.class) {
+            if (BATCHED_OUTPUT.isEmpty()) return;
+            try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
+                 DataOutputStream dos = new DataOutputStream(bas)) {
+                dos.writeInt(BATCHED_OUTPUT.size());
+                for (byte[] bytes : BATCHED_OUTPUT) {
+                    dos.writeInt(bytes.length);
+                    dos.write(bytes);
+                }
+                batched = bas.toString(StandardCharsets.ISO_8859_1.name());
+            } catch (Exception e) {
+                handleException(e);
+                return;
+            }
+            BATCHED_OUTPUT.clear();
+            BATCH_SIZE = 0;
+        }
+        outputWritten(batched);
     }
 
     // It's used by the debugger.

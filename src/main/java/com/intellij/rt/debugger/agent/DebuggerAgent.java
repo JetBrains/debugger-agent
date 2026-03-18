@@ -17,12 +17,12 @@ public class DebuggerAgent {
 
   // Always update current version after changes in agent.
   @SuppressWarnings("unused")
-  public final static int BREAKPOINT_INSTRUMENTATION_CURRENT_VERSION = 4;
+  public final static int BREAKPOINT_INSTRUMENTATION_CURRENT_VERSION = 5;
 
   // Update this to the BREAKPOINT_INSTRUMENTATION_CURRENT_VERSION value in case older IDEA versions cannot work with the new agent version.
   // It is easier to extract versions from this class as it will be loaded before InstrumentationBreakpointTransformer
   @SuppressWarnings("unused")
-  public final static int BREAKPOINT_INSTRUMENTATION_MIN_VERSION = 4;
+  public final static int BREAKPOINT_INSTRUMENTATION_MIN_VERSION = 5;
 
   public static void premain(String args, Instrumentation instrumentation) {
     if (DebuggerAgent.class.getClassLoader() != null) {
