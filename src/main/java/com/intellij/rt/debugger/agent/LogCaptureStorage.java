@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 public class LogCaptureStorage {
 
@@ -25,26 +27,22 @@ public class LogCaptureStorage {
 
     private static final int MAX_STACK_DEPTH = 100; // It should be enough, we usually need only a few first frames.
 
-    public static boolean init() {
+    public static boolean init(Properties properties) {
         ENABLED = true;
-        BATCHING_ENABLED = SuspendHelper.addPeriodicListener(new Runnable() {
-            @Override
-            public void run() {
-                if (!BATCHING_ENABLED) return;
-                try {
-                    flush();
-                } catch (Throwable e) {
-                    handleException(e);
-                }
-            }
-        });
+        BATCHING_ENABLED = Boolean.parseBoolean(properties.getProperty("logCaptureBatchingEnabled", "true"));
         if (BATCHING_ENABLED) {
-            Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
+            Runnable flushRunnable = new Runnable() {
                 @Override
                 public void run() {
-                    flush();
+                    try {
+                        flush();
+                    } catch (Throwable e) {
+                        handleException(e);
+                    }
                 }
-            }));
+            };
+            DebuggerAgent.SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(flushRunnable, 100, 100, TimeUnit.MILLISECONDS);
+            Runtime.getRuntime().addShutdownHook(new Thread(flushRunnable));
         }
         return true;
     }
