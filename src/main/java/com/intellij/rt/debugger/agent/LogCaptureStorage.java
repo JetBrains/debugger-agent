@@ -34,9 +34,7 @@ public class LogCaptureStorage {
                 try {
                     flush();
                 } catch (Throwable e) {
-                    BATCHING_ENABLED = false;
-                    System.err.println("Error while flushing log capture:");
-                    e.printStackTrace(System.err);
+                    handleException(e);
                 }
             }
         });
@@ -100,7 +98,7 @@ public class LogCaptureStorage {
         capture(fd, bytes, 0, bytes.length);
     }
 
-    private static void handleException(Exception e) {
+    private static void handleException(Throwable e) {
         ENABLED = false;
         System.err.println("Debugger agent, log capture: cannot capture logging");
         e.printStackTrace(System.err);
@@ -109,13 +107,13 @@ public class LogCaptureStorage {
     private static void flush() {
         String batched;
         synchronized (LogCaptureStorage.class) {
-            List<byte[]> batchedData = BATCHED_OUTPUT;
-            batched = encodeBatchedData(batchedData);
-            if (batched == null) return;
-            batchedData.clear();
+            batched = encodeBatchedData(BATCHED_OUTPUT);
+            BATCHED_OUTPUT.clear();
             BATCH_SIZE = 0;
         }
-        outputWritten(batched);
+        if (batched != null) {
+            outputWritten(batched);
+        }
     }
 
     private static String encodeBatchedData(List<byte[]> batchedData) {
