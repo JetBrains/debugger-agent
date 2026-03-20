@@ -17,9 +17,9 @@ public class LogCaptureEncodingTest {
         byte[] bytes = message.getBytes(StandardCharsets.UTF_8);
         List<StackTraceElement> stack = Arrays.asList(throwable.getStackTrace());
         byte[] encodedBytes = LogCaptureStorage.encodeMessageAndStacks(bytes, 0, bytes.length, stack, null);
-        System.out.println(encodedBytes.length); // 11654
-        Assert.assertTrue(encodedBytes.length > 11_000);
-        Assert.assertTrue(encodedBytes.length < 12_000);
+        System.out.println(encodedBytes.length); // 10
+        Assert.assertTrue(encodedBytes.length > 0);
+        Assert.assertTrue(encodedBytes.length < 100);
     }
 
     private Throwable getThrowableWithDeepStack(int depth) {

@@ -10,6 +10,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
+import java.util.zip.GZIPOutputStream;
 
 public class LogCaptureStorage {
 
@@ -90,7 +91,7 @@ public class LogCaptureStorage {
                                          List<StackTraceElement> regularStack,
                                          List<StackTraceElement> capturedStack) throws IOException {
         try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
-             DataOutputStream dos = new DataOutputStream(bas)) {
+             DataOutputStream dos = new DataOutputStream(new GZIPOutputStream(bas))) {
             dos.writeInt(len);
             dos.write(bytes, off, len);
             CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
