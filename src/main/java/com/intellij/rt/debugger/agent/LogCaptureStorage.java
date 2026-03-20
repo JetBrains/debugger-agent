@@ -109,14 +109,19 @@ public class LogCaptureStorage {
     }
 
     private static void flush() {
-        String batched;
-        synchronized (LogCaptureStorage.class) {
-            batched = encodeBatchedData(BATCHED_OUTPUT);
-            BATCHED_OUTPUT.clear();
-            BATCH_SIZE = 0;
-        }
+        String batched = prepareBatchedDataAndClear();
         if (batched != null) {
             outputWritten(batched);
+        }
+    }
+
+    // It's used by the debugger.
+    private static String prepareBatchedDataAndClear() {
+        synchronized (LogCaptureStorage.class) {
+            String batched = encodeBatchedData(BATCHED_OUTPUT);
+            BATCHED_OUTPUT.clear();
+            BATCH_SIZE = 0;
+            return batched;
         }
     }
 
