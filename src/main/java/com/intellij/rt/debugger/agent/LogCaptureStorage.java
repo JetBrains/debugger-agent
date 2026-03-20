@@ -3,6 +3,7 @@ package com.intellij.rt.debugger.agent;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.FileDescriptor;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -57,18 +58,7 @@ public class LogCaptureStorage {
             List<StackTraceElement> regularStack = CaptureStorage.getCurrentStackTraceWithoutAgentFrames();
             List<StackTraceElement> capturedStack = CaptureStorage.getCurrentCapturedStack(MAX_STACK_DEPTH - regularStack.size());
 
-            byte[] captured;
-            try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
-                 DataOutputStream dos = new DataOutputStream(bas)) {
-                dos.writeInt(len);
-                dos.write(bytes, off, len);
-                CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
-                if (capturedStack != null) {
-                    CaptureStorage.writeAsyncStackTraceElementToStream(CaptureStorage.ASYNC_STACK_ELEMENT, dos);
-                    CaptureStorage.writeAsyncStackTraceToStream(capturedStack, dos);
-                }
-                captured = bas.toByteArray();
-            }
+            byte[] captured = encodeMessageAndStacks(bytes, off, len, regularStack, capturedStack);
 
             if (BATCHING_ENABLED) {
                 synchronized (LogCaptureStorage.class) {
@@ -94,6 +84,22 @@ public class LogCaptureStorage {
 
     public static void capture(FileDescriptor fd, byte[] bytes) {
         capture(fd, bytes, 0, bytes.length);
+    }
+
+    static byte[] encodeMessageAndStacks(byte[] bytes, int off, int len,
+                                         List<StackTraceElement> regularStack,
+                                         List<StackTraceElement> capturedStack) throws IOException {
+        try (ByteArrayOutputStream bas = new ByteArrayOutputStream();
+             DataOutputStream dos = new DataOutputStream(bas)) {
+            dos.writeInt(len);
+            dos.write(bytes, off, len);
+            CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
+            if (capturedStack != null) {
+                CaptureStorage.writeAsyncStackTraceElementToStream(CaptureStorage.ASYNC_STACK_ELEMENT, dos);
+                CaptureStorage.writeAsyncStackTraceToStream(capturedStack, dos);
+            }
+            return bas.toByteArray();
+        }
     }
 
     private static void handleException(Throwable e) {
