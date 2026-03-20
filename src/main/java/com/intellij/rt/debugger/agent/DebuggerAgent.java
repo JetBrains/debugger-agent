@@ -28,10 +28,10 @@ public class DebuggerAgent {
   public final static int BREAKPOINT_INSTRUMENTATION_MIN_VERSION = 5;
 
   /**
-   * Used for periodic small tasks.
+   * Used for small periodic tasks.
    * Do not use it for long-running tasks, as it will block other debugger operations.
    */
-  public static final ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
+  static final ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
     @Override
     public Thread newThread(Runnable r) {
       Thread thread = new Thread(r, "IntelliJ Debugger Helper Thread");
