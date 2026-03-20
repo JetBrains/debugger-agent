@@ -3,10 +3,13 @@ package com.intellij.rt.debugger.agent;
 import org.junit.Assert;
 import org.junit.Test;
 
+import java.io.ByteArrayInputStream;
+import java.io.DataInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.zip.GZIPInputStream;
 
 public class LogCaptureEncodingTest {
 
@@ -14,7 +17,7 @@ public class LogCaptureEncodingTest {
     public void test() throws Exception {
         String message = "Hello, world!";
 
-        Random random = new Random();
+        Random random = new Random(42);
         List<String> randomNames = new ArrayList<>();
         for (int i = 0; i < 100; i++) {
             randomNames.add(genRandomString(random, 10));
@@ -26,9 +29,20 @@ public class LogCaptureEncodingTest {
             stack.add(genStackTraceElement(random, randomNames));
         }
         byte[] encodedBytes = LogCaptureStorage.encodeMessageAndStacks(bytes, 0, bytes.length, stack, null);
-        System.out.println(encodedBytes.length); // 10
-        Assert.assertTrue(encodedBytes.length > 0);
-        Assert.assertTrue(encodedBytes.length < 100);
+        System.out.println(encodedBytes.length); // 2825
+        Assert.assertTrue(encodedBytes.length > 2000);
+        Assert.assertTrue(encodedBytes.length < 3000);
+
+        // Now decode
+        try (DataInputStream is = new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(encodedBytes)))) {
+            int size = is.readInt();
+            byte[] contentBytes = new byte[size];
+            for (int i = 0; i < size; i++) {
+                contentBytes[i] = is.readByte();
+            }
+            String content = new String(contentBytes, StandardCharsets.UTF_8);
+            Assert.assertEquals(message, content);
+        }
     }
 
     private StackTraceElement genStackTraceElement(Random random, List<String> names) {
