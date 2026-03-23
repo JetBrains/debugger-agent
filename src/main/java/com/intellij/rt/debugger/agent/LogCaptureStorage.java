@@ -21,7 +21,8 @@ public class LogCaptureStorage {
 
     private static boolean BATCHING_ENABLED;
     private static final long MAX_BATCH_SIZE = 1024 * 1024; // 1MB
-    private static long BATCH_SIZE = 0;
+    // It's used by the debugger.
+    private static volatile int BATCH_SIZE = 0;
     private static final List<byte[]> BATCHED_OUTPUT = new ArrayList<>();
 
     private static final FileDescriptor FD_OUT = FileDescriptor.out;
