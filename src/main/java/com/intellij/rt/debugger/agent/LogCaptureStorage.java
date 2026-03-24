@@ -17,7 +17,12 @@ public class LogCaptureStorage {
     private static boolean ENABLED;
 
     // To prevent capturing during capturing.
-    private static boolean CAPTURING;
+    private final static ThreadLocal<Boolean> CAPTURING = new ThreadLocal<Boolean>() {
+        @Override
+        protected Boolean initialValue() {
+            return false;
+        }
+    };
 
     private static boolean BATCHING_ENABLED;
     private static final long MAX_BATCH_SIZE = 1024 * 1024; // 1MB
@@ -37,22 +42,25 @@ public class LogCaptureStorage {
             Runnable flushRunnable = new Runnable() {
                 @Override
                 public void run() {
+                    CAPTURING.set(true);
                     try {
                         flush();
                     } catch (Throwable e) {
                         handleException(e);
+                    } finally {
+                        CAPTURING.set(false);
                     }
                 }
             };
             DebuggerAgent.SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(flushRunnable, 100, 100, TimeUnit.MILLISECONDS);
-            Runtime.getRuntime().addShutdownHook(new Thread(flushRunnable));
+            Runtime.getRuntime().addShutdownHook(new Thread(flushRunnable, "IntelliJ Debugger Shutdown Log Flush Thread"));
         }
         return true;
     }
 
     public static void capture(FileDescriptor fd, byte[] bytes, int off, int len) {
-        if (!ENABLED || CAPTURING) return;
-        CAPTURING = true;
+        if (!ENABLED || CAPTURING.get()) return;
+        CAPTURING.set(true);
         try {
             if (fd != FD_OUT && fd != FD_ERR) return;
             if (len == 0) return;
@@ -80,7 +88,7 @@ public class LogCaptureStorage {
         } catch (Exception e) {
             handleException(e);
         } finally {
-            CAPTURING = false;
+            CAPTURING.set(false);
         }
     }
 
@@ -120,10 +128,12 @@ public class LogCaptureStorage {
     // It's used by the debugger.
     private static String prepareBatchedDataAndClear() {
         synchronized (LogCaptureStorage.class) {
-            String batched = encodeBatchedData(BATCHED_OUTPUT);
-            BATCHED_OUTPUT.clear();
-            BATCH_SIZE = 0;
-            return batched;
+            try {
+                return encodeBatchedData(BATCHED_OUTPUT);
+            } finally {
+                BATCHED_OUTPUT.clear();
+                BATCH_SIZE = 0;
+            }
         }
     }
 
