@@ -10,15 +10,14 @@ import java.lang.instrument.ClassFileTransformer;
 import java.lang.instrument.Instrumentation;
 import java.lang.instrument.UnmodifiableClassException;
 import java.security.ProtectionDomain;
-import java.util.Properties;
 
 import static com.intellij.rt.debugger.agent.CaptureAgent.getInternalClsName;
 
 class LogCaptureTransformer implements ClassFileTransformer {
-    public static void init(Properties properties, Instrumentation instrumentation) {
+    public static void init(Instrumentation instrumentation) {
         if (!Boolean.getBoolean("debugger.agent.enable.log.capture")) return;
 
-        if (!LogCaptureStorage.init(properties)) return;
+        if (!LogCaptureStorage.init()) return;
 
         instrumentation.addTransformer(new LogCaptureTransformer(), true);
         for (Class<?> aClass : instrumentation.getAllLoadedClasses()) {

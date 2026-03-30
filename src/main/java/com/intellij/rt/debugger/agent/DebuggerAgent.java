@@ -10,9 +10,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.Properties;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ThreadFactory;
 
 @SuppressWarnings("UseOfSystemOutOrSystemErr")
 public class DebuggerAgent {
@@ -26,19 +23,6 @@ public class DebuggerAgent {
   // It is easier to extract versions from this class as it will be loaded before InstrumentationBreakpointTransformer
   @SuppressWarnings("unused")
   public final static int BREAKPOINT_INSTRUMENTATION_MIN_VERSION = 6;
-
-  /**
-   * Used for small periodic tasks.
-   * Do not use it for long-running tasks, as it will block other debugger operations.
-   */
-  static final ScheduledExecutorService SCHEDULED_EXECUTOR_SERVICE = Executors.newSingleThreadScheduledExecutor(new ThreadFactory() {
-    @Override
-    public Thread newThread(Runnable r) {
-      Thread thread = new Thread(r, "IntelliJ Debugger Helper Thread");
-      thread.setDaemon(true);
-      return thread;
-    }
-  });
 
   public static void premain(String args, Instrumentation instrumentation) {
     if (DebuggerAgent.class.getClassLoader() != null) {
@@ -64,7 +48,7 @@ public class DebuggerAgent {
     CollectionBreakpointInstrumentor.init(properties, instrumentation);
     SpilledVariablesTransformer.init(instrumentation);
     TailCallContinuationTransformer.init(instrumentation);
-    LogCaptureTransformer.init(properties, instrumentation);
+    LogCaptureTransformer.init(instrumentation);
     InstrumentationBreakpointTransformer.init(properties, instrumentation);
   }
 
