@@ -8,7 +8,7 @@ public class SuspendHelper {
     if (!Boolean.parseBoolean(properties.getProperty("suspendHelper", "false"))) {
       return;
     }
-    DebuggerAgent.SCHEDULED_EXECUTOR_SERVICE.scheduleWithFixedDelay(new Runnable() {
+    DebuggerAgent.SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(new Runnable() {
       @Override
       public void run() {
         suspendHelperLoopBody();

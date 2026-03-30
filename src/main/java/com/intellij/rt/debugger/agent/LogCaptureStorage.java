@@ -9,7 +9,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPOutputStream;
 
@@ -40,7 +39,7 @@ public class LogCaptureStorage {
         ENABLED = true;
         BATCHING_ENABLED = Boolean.parseBoolean(properties.getProperty("logCaptureBatchingEnabled", "true"));
         if (BATCHING_ENABLED) {
-            final Runnable flushRunnable = new Runnable() {
+            Runnable flushRunnable = new Runnable() {
                 @Override
                 public void run() {
                     CAPTURING.set(true);
@@ -53,18 +52,8 @@ public class LogCaptureStorage {
                     }
                 }
             };
-            final ScheduledFuture<?> task = DebuggerAgent.SCHEDULED_EXECUTOR_SERVICE.scheduleWithFixedDelay(flushRunnable, 100, 100, TimeUnit.MILLISECONDS);
-            Runtime.getRuntime().addShutdownHook(new Thread(new Runnable() {
-                @Override
-                public void run() {
-                    task.cancel(false);
-                    try {
-                        task.get();
-                    } catch (Throwable ignored) {
-                    }
-                    flushRunnable.run();
-                }
-            }, "IntelliJ Debugger Shutdown Log Flush Thread"));
+            DebuggerAgent.SCHEDULED_EXECUTOR_SERVICE.scheduleAtFixedRate(flushRunnable, 100, 100, TimeUnit.MILLISECONDS);
+            Runtime.getRuntime().addShutdownHook(new Thread(flushRunnable, "IntelliJ Debugger Shutdown Log Flush Thread"));
         }
         return true;
     }
