@@ -1,31 +1,23 @@
 package com.intellij.rt.debugger.agent;
 
 import java.util.Properties;
+import java.util.concurrent.TimeUnit;
 
 public class SuspendHelper {
   public static void init(Properties properties) {
     if (!Boolean.parseBoolean(properties.getProperty("suspendHelper", "false"))) {
       return;
     }
-    Thread intelliJSuspendHelper = new Thread(new Runnable() {
+    DebuggerAgent.SCHEDULED_EXECUTOR_SERVICE.scheduleWithFixedDelay(new Runnable() {
       @Override
       public void run() {
-        while (true) {
-          try {
-            suspendHelperLoopBody();
-          } catch (InterruptedException e) {
-            break;
-          }
-        }
+        suspendHelperLoopBody();
       }
-    }, "IntelliJ Suspend Helper");
-    intelliJSuspendHelper.setDaemon(true);
-    intelliJSuspendHelper.start();
+    }, 0, 50, TimeUnit.MILLISECONDS);
   }
 
   // It may be used to suspend this thread by the debugger (so stop busy waiting)
   // and resume it to ensure suspend-all will happen.
-  private static void suspendHelperLoopBody() throws InterruptedException {
-    Thread.sleep(50);
+  private static void suspendHelperLoopBody() {
   }
 }
