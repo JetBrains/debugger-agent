@@ -651,7 +651,7 @@ public final class CaptureStorage {
     // skip the first one -- it's Thread.getStackTrace
     for (int i = 1; i < stackTrace.length; i++) {
       StackTraceElement elem = stackTrace[i];
-      if (isNotAgentFrame(elem)) {
+      if (!isAgentFrame(elem)) {
         return elem.getClassName() + "." + elem.getMethodName();
       }
     }
