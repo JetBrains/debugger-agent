@@ -88,7 +88,7 @@ public class OverheadDetector {
                         myTimeNs = System.nanoTime();
                     }
                 }
-            }, "CoarseTimer");
+            }, "IntelliJ Debugger Overhead Detector Coarse Timer");
             thread.setDaemon(true);
             thread.start();
         }
