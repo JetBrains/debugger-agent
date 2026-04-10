@@ -17,6 +17,10 @@ public class LogCaptureEncodingTest {
 
     @Test
     public void test() throws Exception {
+        // Please disable the agent if you try to debug this test.
+        // Otherwise, you debug the bundled agent and not the code in the project.
+        assertEquals(this.getClass().getClassLoader(), LogCaptureStorage.class.getClassLoader());
+
         Properties properties = new Properties();
         properties.put(LogCaptureStorage.BATCHING_ENABLED_PROPERTY, "true");
         properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1"); // 1 is ok, 2 is a signal to flush
