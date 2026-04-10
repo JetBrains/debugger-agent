@@ -123,8 +123,8 @@ public class LogCaptureStorage {
     }
 
     private static byte[] encodeMessageAndStacks(byte[] bytes, int off, int len,
-                                         List<StackTraceElement> regularStack,
-                                         List<StackTraceElement> capturedStack) throws IOException {
+                                                 List<StackTraceElement> regularStack,
+                                                 List<StackTraceElement> capturedStack) throws IOException {
         ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
         try (DataOutputStream dos = new DataOutputStream(bas)) {
             dos.writeInt(len);
@@ -154,7 +154,7 @@ public class LogCaptureStorage {
         ArrayList<Event> eventsSnapshot = new ArrayList<>(EVENTS);
         if (eventsSnapshot.size() <= eventsCountLimit) return;
         packAndSend(eventsSnapshot);
-        EVENTS.removeAll(eventsSnapshot);
+        EVENTS.removeAll(new HashSet<>(eventsSnapshot));
     }
 
     private static void packAndSend(Collection<Event> events) throws IOException {
