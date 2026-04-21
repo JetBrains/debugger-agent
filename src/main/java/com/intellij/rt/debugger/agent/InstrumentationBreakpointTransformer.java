@@ -187,7 +187,6 @@ public class InstrumentationBreakpointTransformer {
                                 successIds.add(instrumentationId);
 
                                 try {
-                                    int[] stackLocalIndexes = spillStack(stackTypes);
                                     Label startTry = new Label();
                                     Label endTry = new Label();
                                     Label catchBlock = new Label();
@@ -195,12 +194,14 @@ public class InstrumentationBreakpointTransformer {
                                     Label theEnd = new Label();
 
                                     //             if (!enterBreakpointCheckInternal()) {
+                                    //                 spill the variables
                                     // startTry  :     try {
                                     //                     fragmentClassName.fragmentEntryMethodName(arguments)
                                     // catchBlock:     } catch (Throwable e) {
                                     //                     reportIncorrectInstrumentation(e.toString(), id)
                                     //                 }
                                     // endOfTry :
+                                    //                 restore the variables
                                     //                 checkIsDone()
                                     //             }
                                     // theEnd:
@@ -214,6 +215,8 @@ public class InstrumentationBreakpointTransformer {
                                             false);
 
                                     mv.visitJumpInsn(Opcodes.IFNE, theEnd);
+
+                                    int[] stackLocalIndexes = spillStack(stackTypes);
 
                                     mv.visitTryCatchBlock(startTry, endTry, catchBlock, "java/lang/Throwable");
 
@@ -248,6 +251,7 @@ public class InstrumentationBreakpointTransformer {
                                             false);
 
                                     mv.visitLabel(endOfTry);
+                                    restoreStack(stackTypes, stackLocalIndexes);
 
                                     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
                                             theTransformerClassName,
@@ -255,7 +259,6 @@ public class InstrumentationBreakpointTransformer {
                                             "()V",
                                             false);
                                     mv.visitLabel(theEnd);
-                                    restoreStack(stackTypes, stackLocalIndexes);
                                 } catch (Throwable e) {
                                     throw new InstrumentationBpExceptionWrapper(e, instrumentationId);
                                 }
