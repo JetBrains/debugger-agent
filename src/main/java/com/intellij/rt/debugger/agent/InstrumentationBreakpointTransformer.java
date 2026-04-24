@@ -191,9 +191,7 @@ public class InstrumentationBreakpointTransformer {
                                     Label endTry = new Label();
                                     Label catchBlock = new Label();
                                     Label endOfTry = new Label();
-                                    Label theEnd = new Label();
 
-                                    //             if (!enterBreakpointCheckInternal()) {
                                     //                 spill the variables
                                     // startTry  :     try {
                                     //                     fragmentClassName.fragmentEntryMethodName(arguments)
@@ -202,19 +200,9 @@ public class InstrumentationBreakpointTransformer {
                                     //                 }
                                     // endOfTry :
                                     //                 restore the variables
-                                    //                 checkIsDone()
-                                    //             }
                                     // theEnd:
 
                                     String theTransformerClassName = getInternalClsName(InstrumentationBreakpointTransformer.class);
-
-                                    mv.visitMethodInsn(Opcodes.INVOKESTATIC,
-                                            theTransformerClassName,
-                                            "enterBreakpointCheckInternal",
-                                            "()Z",
-                                            false);
-
-                                    mv.visitJumpInsn(Opcodes.IFNE, theEnd);
 
                                     int[] stackLocalIndexes = spillStack(stackTypes);
 
@@ -252,13 +240,6 @@ public class InstrumentationBreakpointTransformer {
 
                                     mv.visitLabel(endOfTry);
                                     restoreStack(stackTypes, stackLocalIndexes);
-
-                                    mv.visitMethodInsn(Opcodes.INVOKESTATIC,
-                                            theTransformerClassName,
-                                            "checkIsDone",
-                                            "()V",
-                                            false);
-                                    mv.visitLabel(theEnd);
                                 } catch (Throwable e) {
                                     throw new InstrumentationBpExceptionWrapper(e, instrumentationId);
                                 }
