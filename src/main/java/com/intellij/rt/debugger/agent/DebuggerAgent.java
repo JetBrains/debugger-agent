@@ -20,7 +20,7 @@ public class DebuggerAgent {
 
   // Always update current version after changes in agent.
   @SuppressWarnings("unused")
-  public final static int BREAKPOINT_INSTRUMENTATION_CURRENT_VERSION = 7;
+  public final static int BREAKPOINT_INSTRUMENTATION_CURRENT_VERSION = 8;
 
   // Update this to the BREAKPOINT_INSTRUMENTATION_CURRENT_VERSION value in case older IDEA versions cannot work with the new agent version.
   // It is easier to extract versions from this class as it will be loaded before InstrumentationBreakpointTransformer

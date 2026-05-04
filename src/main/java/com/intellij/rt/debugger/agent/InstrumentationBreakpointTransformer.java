@@ -65,6 +65,32 @@ public class InstrumentationBreakpointTransformer {
     static final int BREAKPOINT_TRANSFORM_READER_FLAGS = ClassReader.EXPAND_FRAMES;
     private static final Set<String> myClassesWithBreakpoints = new LinkedHashSet<>();
 
+    private static final Map<String, ClassInstrumentationState> myExistedInstrumentationInfo = new HashMap<>();
+
+    public static class ClassInstrumentationState {
+        public volatile String[][] instrumentationInfoTable = new String[0][];
+        public volatile int[] successfullyInstalled = new int[0];
+        public volatile String failureReport;
+        public volatile int[] failedInstrumentationIds = new int[0];
+        public volatile byte[] failedResultBytecode;
+    }
+
+    @SuppressWarnings("unused")
+    public static ClassInstrumentationState getInstrumentationState(String className) {
+        synchronized (myExistedInstrumentationInfo) {
+            return myExistedInstrumentationInfo.get(className);
+        }
+    }
+
+    @SuppressWarnings("unused")
+    public static void setInstrumentationState(String className, String[][] instrumentationInfoTable) {
+        ClassInstrumentationState state = new ClassInstrumentationState();
+        state.instrumentationInfoTable = instrumentationInfoTable;
+        synchronized (myExistedInstrumentationInfo) {
+            myExistedInstrumentationInfo.put(className, state);
+        }
+    }
+
     public static void init(Properties properties, Instrumentation instrumentation) {
         applyProperties(properties);
         instrumentation.addTransformer(new BreakpointInstrumentalist(), true);
@@ -99,8 +125,15 @@ public class InstrumentationBreakpointTransformer {
             try {
                 String[][] infoTable = requestInstrumentedInfo(className);
                 if (infoTable.length == 0) {
+                    infoTable = getSavedInstrumentationInfoTable(className);
+                }
+                else {
+                    saveInstrumentationInfoTable(className, infoTable);
+                }
+                if (infoTable.length == 0) {
                     return null;
                 }
+                resetInstrumentationResult(className);
 
                 final Map<String, Map<Integer, InstrumentationBreakpointInfo>> methods = new LinkedHashMap<>();
                 for (String[] infoArray : infoTable) {
@@ -266,9 +299,9 @@ public class InstrumentationBreakpointTransformer {
                 }, BREAKPOINT_TRANSFORM_READER_FLAGS, true);
             } catch (Throwable e) {
                 if (e instanceof InstrumentationBpExceptionWrapper) {
-                    instrumentationFailed(e.getCause(), new int[]{((InstrumentationBpExceptionWrapper) e).instrumentationId}, null);
+                    instrumentationFailed(className, e.getCause(), new int[]{((InstrumentationBpExceptionWrapper) e).instrumentationId}, null);
                 } else {
-                    instrumentationFailed(e, getIntArrayFromList(successIds), null);
+                    instrumentationFailed(className, e, getIntArrayFromList(successIds), null);
                 }
                 return null;
             }
@@ -285,16 +318,70 @@ public class InstrumentationBreakpointTransformer {
                     a.analyze(cn.name, mn);
                 }
             } catch (Throwable e) {
-                instrumentationFailed(e, getIntArrayFromList(successIds), resultBytecode);
+                instrumentationFailed(className, e, getIntArrayFromList(successIds), resultBytecode);
                 return null;
             }
 
             int[] intArray = getIntArrayFromList(successIds);
 
+            recordSuccessfullyInstrumented(className, intArray);
             successfullyInstrumented(loader, intArray);
 
             return resultBytecode;
         }
+    }
+
+    private static String[][] getSavedInstrumentationInfoTable(String className) {
+        ClassInstrumentationState instrumentationState = getInstrumentationState(className);
+        if (instrumentationState == null || instrumentationState.instrumentationInfoTable == null) {
+            return new String[0][];
+        }
+        return instrumentationState.instrumentationInfoTable;
+    }
+
+    private static void saveInstrumentationInfoTable(String className, String[][] instrumentationInfoTable) {
+        synchronized (myExistedInstrumentationInfo) {
+            getOrCreateInstrumentationState(className).instrumentationInfoTable = instrumentationInfoTable;
+        }
+    }
+
+    private static void recordSuccessfullyInstrumented(String className, int[] instrumentationIds) {
+        synchronized (myExistedInstrumentationInfo) {
+            ClassInstrumentationState state = getOrCreateInstrumentationState(className);
+            state.successfullyInstalled = instrumentationIds;
+            state.failureReport = null;
+            state.failedInstrumentationIds = new int[0];
+            state.failedResultBytecode = null;
+        }
+    }
+
+    private static void recordInstrumentationFailed(String className, String report, int[] instrumentationIds, byte[] resultBytecode) {
+        synchronized (myExistedInstrumentationInfo) {
+            ClassInstrumentationState state = getOrCreateInstrumentationState(className);
+            state.successfullyInstalled = new int[0];
+            state.failureReport = report;
+            state.failedInstrumentationIds = instrumentationIds;
+            state.failedResultBytecode = resultBytecode;
+        }
+    }
+
+    private static void resetInstrumentationResult(String className) {
+        synchronized (myExistedInstrumentationInfo) {
+            ClassInstrumentationState state = getOrCreateInstrumentationState(className);
+            state.successfullyInstalled = new int[0];
+            state.failureReport = null;
+            state.failedInstrumentationIds = new int[0];
+            state.failedResultBytecode = null;
+        }
+    }
+
+    private static ClassInstrumentationState getOrCreateInstrumentationState(String className) {
+        ClassInstrumentationState state = myExistedInstrumentationInfo.get(className);
+        if (state == null) {
+            state = new ClassInstrumentationState();
+            myExistedInstrumentationInfo.put(className, state);
+        }
+        return state;
     }
 
     private static Map<Integer, InstrumentationBreakpointMappingInfo> collectArgumentMapping(String owner, MethodNode method, Map<Integer, InstrumentationBreakpointInfo> lineNumbers) {
@@ -538,7 +625,8 @@ public class InstrumentationBreakpointTransformer {
     @SuppressWarnings("unused")
     public static boolean isUnmutedState;
 
-    public static void instrumentationFailed(Throwable exception, int[] instrumentationIds, byte[] resultBytecode) {
+    private static void instrumentationFailed(String className, Throwable exception, int[] instrumentationIds, byte[] resultBytecode) {
+        String report;
         try (
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
                 PrintStream ps = new PrintStream(baos);
@@ -556,11 +644,15 @@ public class InstrumentationBreakpointTransformer {
                 ps.println("\tat " + trace[i]);
             }
 
-            reportInstrumentationFailed(baos.toString(), instrumentationIds, resultBytecode);
+            report = baos.toString();
         } catch (IOException ex) {
             // Should not happen.
-            reportInstrumentationFailed(exception.toString(), instrumentationIds, resultBytecode);
+            report = exception.toString();
         }
+        if (className != null) {
+            recordInstrumentationFailed(className, report, instrumentationIds, resultBytecode);
+        }
+        reportInstrumentationFailed(report, instrumentationIds, resultBytecode);
     }
 
     public static String[][] requestInstrumentedInfo(@SuppressWarnings("unused") String className) {
