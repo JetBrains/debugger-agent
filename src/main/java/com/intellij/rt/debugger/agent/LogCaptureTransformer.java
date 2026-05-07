@@ -72,6 +72,9 @@ class LogCaptureTransformer implements ClassFileTransformer {
                                 mv.visitFieldInsn(Opcodes.GETFIELD,
                                         "java/io/FileOutputStream",
                                         "fd", "Ljava/io/FileDescriptor;");
+                                mv.visitFieldInsn(Opcodes.GETFIELD,
+                                        "java/io/FileDescriptor",
+                                        "fd", "I");
                                 mv.visitVarInsn(Opcodes.ALOAD, 1);
                                 if (isWithOffset) {
                                     mv.visitVarInsn(Opcodes.ILOAD, 2);
@@ -79,7 +82,7 @@ class LogCaptureTransformer implements ClassFileTransformer {
                                 }
                                 mv.visitMethodInsn(Opcodes.INVOKESTATIC,
                                         getInternalClsName(LogCaptureStorage.class),
-                                        "capture", "(Ljava/io/FileDescriptor;[B" + (isWithOffset ? "II" : "") + ")V",
+                                        "capture", "(I[B" + (isWithOffset ? "II" : "") + ")V",
                                         false);
                             }
                         };

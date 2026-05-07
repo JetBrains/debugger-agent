@@ -2,7 +2,6 @@ package com.intellij.rt.debugger.agent;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
-import java.io.FileDescriptor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -50,8 +49,9 @@ public class LogCaptureStorage {
         }
     }
 
-    private static final FileDescriptor FD_OUT = FileDescriptor.out;
-    private static final FileDescriptor FD_ERR = FileDescriptor.err;
+    // See FileDescriptor for constants
+    private static final int FD_OUT = 1;
+    private static final int FD_ERR = 2;
 
     private static final int MAX_STACK_DEPTH = 100; // It should be enough, we usually need only a few first frames.
 
@@ -87,21 +87,23 @@ public class LogCaptureStorage {
         return true;
     }
 
-    public static void capture(FileDescriptor fd, byte[] bytes) {
+    public static void capture(int fd, byte[] bytes) {
         capture(fd, bytes, 0, bytes.length);
     }
 
-    public static void capture(FileDescriptor fd, byte[] bytes, int off, int len) {
+    public static void capture(int fd, byte[] bytes, int off, int len) {
         if (!ENABLED || CAPTURING.get()) return;
         CAPTURING.set(true);
         try {
             if (fd != FD_OUT && fd != FD_ERR) return;
             if (len == 0) return;
 
+            boolean isErr = fd == FD_ERR;
+
             List<StackTraceElement> regularStack = CaptureStorage.getCurrentStackTraceWithoutAgentFrames();
             List<StackTraceElement> capturedStack = CaptureStorage.getCurrentCapturedStack(MAX_STACK_DEPTH - regularStack.size());
 
-            byte[] captured = encodeMessageAndStacks(bytes, off, len, regularStack, capturedStack);
+            byte[] captured = encodeMessageAndStacks(bytes, off, len, isErr, regularStack, capturedStack);
             captureEvent(captured);
 
         } catch (Throwable e) {
@@ -123,12 +125,14 @@ public class LogCaptureStorage {
     }
 
     private static byte[] encodeMessageAndStacks(byte[] bytes, int off, int len,
+                                                 boolean isErr,
                                                  List<StackTraceElement> regularStack,
                                                  List<StackTraceElement> capturedStack) throws IOException {
         ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
         try (DataOutputStream dos = new DataOutputStream(bas)) {
             dos.writeInt(len);
             dos.write(bytes, off, len);
+            dos.writeBoolean(isErr);
             CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
             if (capturedStack != null) {
                 CaptureStorage.writeAsyncStackTraceElementToStream(CaptureStorage.ASYNC_STACK_ELEMENT, dos);

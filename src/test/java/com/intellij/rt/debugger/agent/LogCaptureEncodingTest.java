@@ -12,6 +12,7 @@ import java.util.Properties;
 import java.util.zip.GZIPInputStream;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 
 public class LogCaptureEncodingTest {
 
@@ -28,26 +29,33 @@ public class LogCaptureEncodingTest {
         LogCaptureStorage.init(properties);
         LogCaptureStorage.outputWrittenDumpForTests = new ArrayList<>();
 
-        LogCaptureStorage.capture(FileDescriptor.out, "aaa\n".getBytes(StandardCharsets.UTF_8));
-        assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
-        LogCaptureStorage.capture(FileDescriptor.out, "bbb\n".getBytes(StandardCharsets.UTF_8));
-        assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
+        capture(new FileDescriptor() /* some non-standard FD */, "xxx\n");
+        assertEquals("not captured at all", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        capture(FileDescriptor.out, "aaa\n");
+        assertEquals("no flush yet", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        capture(FileDescriptor.err, "bbb\n");
+        assertEquals("flushed", 1, LogCaptureStorage.outputWrittenDumpForTests.size());
+
         String output = LogCaptureStorage.outputWrittenDumpForTests.get(0);
 
         try (DataInputStream is = new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(output.getBytes(StandardCharsets.ISO_8859_1))))) {
             assertEquals(2, is.readInt()); // count
-            readAndCheckEvent(0, "aaa\n", is);
-            readAndCheckEvent(1, "bbb\n", is);
+            readAndCheckEvent(0, false, "aaa\n", is);
+            readAndCheckEvent(1, true, "bbb\n", is);
         }
     }
 
-    private static void readAndCheckEvent(int expectedId, String expectedMsg, DataInputStream is) throws IOException {
+    private static void readAndCheckEvent(int expectedId, boolean expectedIsErr, String expectedMsg, DataInputStream is) throws IOException {
         assertEquals(expectedId, is.readLong());
         byte[] msgAndStackTrace = readBytesWithSize(is);
         try (DataInputStream eis = new DataInputStream(new ByteArrayInputStream(msgAndStackTrace))) {
             byte[] msgBytes = readBytesWithSize(eis);
             String msg = new String(msgBytes, StandardCharsets.UTF_8);
             assertEquals(expectedMsg, msg);
+            boolean isErr = eis.readBoolean();
+            assertEquals(expectedIsErr, isErr);
             // don't hassle with stack trace
         }
     }
@@ -60,5 +68,19 @@ public class LogCaptureEncodingTest {
             bytes[i] = is.readByte();
         }
         return bytes;
+    }
+
+    private static void capture(FileDescriptor fd, String text) {
+        LogCaptureStorage.capture(getFileDescriptorId(fd), text.getBytes(StandardCharsets.UTF_8));
+    }
+    
+    private static int getFileDescriptorId(FileDescriptor fd) {
+        try {
+            java.lang.reflect.Field fdField = FileDescriptor.class.getDeclaredField("fd");
+            fdField.setAccessible(true);
+            return fdField.getInt(fd);
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to get file descriptor id", e);
+        }
     }
 }
