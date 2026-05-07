@@ -16,9 +16,9 @@ import static com.intellij.rt.debugger.agent.CaptureAgent.getInternalClsName;
 
 class LogCaptureTransformer implements ClassFileTransformer {
     public static void init(Properties properties, Instrumentation instrumentation) {
-        if (!Boolean.getBoolean("debugger.agent.enable.log.capture")) return;
-
-        if (!LogCaptureStorage.init(properties)) return;
+        boolean logCaptureEnabled = Boolean.getBoolean("debugger.agent.enable.log.capture");
+        if (!LogCaptureStorage.init(properties, logCaptureEnabled)) return;
+        if (!logCaptureEnabled) return;
 
         instrumentation.addTransformer(new LogCaptureTransformer(), true);
         for (Class<?> aClass : instrumentation.getAllLoadedClasses()) {

@@ -29,23 +29,32 @@ public class LogCaptureStorage {
 
     private static boolean BATCHING_ENABLED;
     private static int MAX_BATCHED_EVENTS_COUNT;
+    private static boolean STDOUT_CAPTURE_ENABLED;
 
     // It's used by the debugger.
-    private static final AtomicLong EVENT_COUNTER = new AtomicLong();
+    static final AtomicLong EVENT_COUNTER = new AtomicLong();
 
     // It contains events that are waiting to be flushed.
     // New ones could be added concurrently.
     // They can also be flushed concurrently, leading to sending the same events multiple times.
     // It's ok and is handed by the debugger using IDs.
     // Event is removed from the queue only after it's guaranteed to be received by the debugger.
-    private static final ConcurrentLinkedQueue<Event> EVENTS = new ConcurrentLinkedQueue<>();
+    static final ConcurrentLinkedQueue<Event> EVENTS = new ConcurrentLinkedQueue<>();
 
-    private static class Event {
+    static final AtomicLong LAST_FLUSHED_EVENT_ID = new AtomicLong(-1);
+    static final AtomicLong LAST_LOGGING_BREAKPOINT_EVENT_ID = new AtomicLong(-1);
+
+    static class Event {
+        public static final int STD_OUTPUT_TYPE = 0;
+        public static final int LOGGING_BREAKPOINT_TYPE = 1;
+
         public final long id;
+        public final int type;
         public final byte[] payload;
 
-        public Event(long id, byte[] payload) {
+        public Event(long id, int type, byte[] payload) {
             this.id = id;
+            this.type = type;
             this.payload = payload;
         }
     }
@@ -55,12 +64,18 @@ public class LogCaptureStorage {
 
     private static final int MAX_STACK_DEPTH = 100; // It should be enough, we usually need only a few first frames.
 
-    public static boolean init(Properties properties) {
+
+    // for tests
+    private static boolean BATCHING_SCHEDULER_STARTED;
+    static ArrayList<String> outputWrittenDumpForTests = null;
+
+    public static boolean init(Properties properties, boolean logCaptureEnabled) {
         ENABLED = true;
+        STDOUT_CAPTURE_ENABLED = logCaptureEnabled;
         BATCHING_ENABLED = Boolean.parseBoolean(properties.getProperty(BATCHING_ENABLED_PROPERTY, "true"));
-        if (BATCHING_ENABLED) {
-            MAX_BATCHED_EVENTS_COUNT = Integer.parseInt(
-                    properties.getProperty(BATCHING_MAX_EVENTS_PROPERTY, "100"));
+        MAX_BATCHED_EVENTS_COUNT = Integer.parseInt(properties.getProperty(BATCHING_MAX_EVENTS_PROPERTY, "100"));
+        if (BATCHING_ENABLED && !BATCHING_SCHEDULER_STARTED) {
+            BATCHING_SCHEDULER_STARTED = true;
 
             final Runnable flushAction = new Runnable() {
                 @Override
@@ -87,6 +102,15 @@ public class LogCaptureStorage {
         return true;
     }
 
+    private static long createNextEventId(int eventType) {
+        if (!BATCHING_ENABLED) return -1;
+        long id = EVENT_COUNTER.getAndIncrement();
+        if (eventType == Event.LOGGING_BREAKPOINT_TYPE) {
+            setIfGreater(LAST_LOGGING_BREAKPOINT_EVENT_ID, id);
+        }
+        return id;
+    }
+
     public static void capture(FileDescriptor fd, byte[] bytes) {
         capture(fd, bytes, 0, bytes.length);
     }
@@ -98,12 +122,19 @@ public class LogCaptureStorage {
             if (fd != FD_OUT && fd != FD_ERR) return;
             if (len == 0) return;
 
-            List<StackTraceElement> regularStack = CaptureStorage.getCurrentStackTraceWithoutAgentFrames();
-            List<StackTraceElement> capturedStack = CaptureStorage.getCurrentCapturedStack(MAX_STACK_DEPTH - regularStack.size());
+            // Avoid logging breakpoint's output reorder with stdout.
+            if (hasBatchedLoggingBreakpointEvents()) {
+                flushBatchedData();
+            }
+            if (!STDOUT_CAPTURE_ENABLED) return;
 
-            byte[] captured = encodeMessageAndStacks(bytes, off, len, regularStack, capturedStack);
-            captureEvent(captured);
-
+            long id = createNextEventId(Event.STD_OUTPUT_TYPE);
+            ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
+            try (DataOutputStream dos = new DataOutputStream(bas)) {
+                encodeMessageAndCurrentStacks(dos, bytes, off, len);
+            }
+            byte[] payload = bas.toByteArray();
+            captureEvent(new Event(id, Event.STD_OUTPUT_TYPE, payload));
         } catch (Throwable e) {
             handleException(e);
         } finally {
@@ -111,31 +142,29 @@ public class LogCaptureStorage {
         }
     }
 
-    private static void captureEvent(byte[] captured) throws IOException {
+    private static boolean hasBatchedLoggingBreakpointEvents() {
+        return LAST_LOGGING_BREAKPOINT_EVENT_ID.get() > LAST_FLUSHED_EVENT_ID.get();
+    }
+
+    private static void captureEvent(Event event) throws IOException {
         if (BATCHING_ENABLED) {
-            long id = EVENT_COUNTER.getAndIncrement();
-            Event event = new Event(id, captured);
             EVENTS.add(event);
             flushBatchedDataIfMoreThan(MAX_BATCHED_EVENTS_COUNT);
         } else {
-            packAndSend(Collections.singletonList(new Event(-1, captured)));
+            packAndSend(Collections.singletonList(event));
         }
     }
 
-    private static byte[] encodeMessageAndStacks(byte[] bytes, int off, int len,
-                                                 List<StackTraceElement> regularStack,
-                                                 List<StackTraceElement> capturedStack) throws IOException {
-        ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
-        try (DataOutputStream dos = new DataOutputStream(bas)) {
-            dos.writeInt(len);
-            dos.write(bytes, off, len);
-            CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
-            if (capturedStack != null) {
-                CaptureStorage.writeAsyncStackTraceElementToStream(CaptureStorage.ASYNC_STACK_ELEMENT, dos);
-                CaptureStorage.writeAsyncStackTraceToStream(capturedStack, dos);
-            }
+    private static void encodeMessageAndCurrentStacks(DataOutputStream dos, byte[] bytes, int off, int len) throws IOException {
+        List<StackTraceElement> regularStack = CaptureStorage.getCurrentStackTraceWithoutAgentFrames();
+        List<StackTraceElement> capturedStack = CaptureStorage.getCurrentCapturedStack(MAX_STACK_DEPTH - regularStack.size());
+        dos.writeInt(len);
+        dos.write(bytes, off, len);
+        CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
+        if (capturedStack != null) {
+            CaptureStorage.writeAsyncStackTraceElementToStream(CaptureStorage.ASYNC_STACK_ELEMENT, dos);
+            CaptureStorage.writeAsyncStackTraceToStream(capturedStack, dos);
         }
-        return bas.toByteArray();
     }
 
     private static void handleException(Throwable e) {
@@ -155,6 +184,8 @@ public class LogCaptureStorage {
         if (eventsSnapshot.size() <= eventsCountLimit) return;
         packAndSend(eventsSnapshot);
         EVENTS.removeAll(new HashSet<>(eventsSnapshot));
+        long lastFlushedId = findMaxId(eventsSnapshot);
+        setIfGreater(LAST_FLUSHED_EVENT_ID, lastFlushedId);
     }
 
     private static void packAndSend(Collection<Event> events) throws IOException {
@@ -166,6 +197,7 @@ public class LogCaptureStorage {
             dos.writeInt(events.size());
             for (Event event : events) {
                 dos.writeLong(event.id);
+                dos.writeInt(event.type);
                 byte[] bytes = event.payload;
                 dos.writeInt(bytes.length);
                 dos.write(bytes);
@@ -176,8 +208,6 @@ public class LogCaptureStorage {
         outputWritten(packed);
     }
 
-    static ArrayList<String> outputWrittenDumpForTests = null;
-
     // It's used by the debugger.
     @SuppressWarnings("unused")
     private static void outputWritten(String captured) {
@@ -186,9 +216,44 @@ public class LogCaptureStorage {
         }
     }
 
-    // It's used by the debugger and instrumentation.
-    @SuppressWarnings("unused")
+    // It's used in instrumentation.
     public static void loggingBreakpointHit(int instrumentationId, String message) {
+        if (!ENABLED || CAPTURING.get()) return;
+        CAPTURING.set(true);
+        try {
+            long id = createNextEventId(Event.LOGGING_BREAKPOINT_TYPE);
+            byte[] messageBytes = message.getBytes(StandardCharsets.UTF_8);
+            ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
+            try (DataOutputStream dos = new DataOutputStream(bas)) {
+                dos.writeInt(instrumentationId);
+                encodeMessageAndCurrentStacks(dos, messageBytes, 0, messageBytes.length);
+            }
+            byte[] payload = bas.toByteArray();
+            captureEvent(new Event(id, Event.LOGGING_BREAKPOINT_TYPE, payload));
+        } catch (Throwable e) {
+            handleException(e);
+        } finally {
+            CAPTURING.set(false);
+        }
     }
 
+    private static long findMaxId(ArrayList<Event> events) {
+        long lastFlushedId = -1;
+        for (int i = events.size() - 1; i >= 0; i--) {
+            long id = events.get(i).id;
+            if (id > lastFlushedId) {
+                lastFlushedId = id;
+            }
+        }
+        return lastFlushedId;
+    }
+
+    private static void setIfGreater(AtomicLong maxValue, long newValue) {
+        while (true) {
+            long current = maxValue.get();
+            if (current >= newValue || maxValue.compareAndSet(current, newValue)) {
+                break;
+            }
+        }
+    }
 }
