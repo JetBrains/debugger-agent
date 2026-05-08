@@ -65,8 +65,7 @@ public class LogCaptureStorage {
     private static final int MAX_STACK_DEPTH = 100; // It should be enough, we usually need only a few first frames.
 
 
-    // for tests
-    private static boolean BATCHING_SCHEDULER_STARTED;
+    private static boolean batchingSchedulerStarted;
     static ArrayList<String> outputWrittenDumpForTests = null;
 
     public static boolean init(Properties properties, boolean logCaptureEnabled) {
@@ -74,8 +73,8 @@ public class LogCaptureStorage {
         STDOUT_CAPTURE_ENABLED = logCaptureEnabled;
         BATCHING_ENABLED = Boolean.parseBoolean(properties.getProperty(BATCHING_ENABLED_PROPERTY, "true"));
         MAX_BATCHED_EVENTS_COUNT = Integer.parseInt(properties.getProperty(BATCHING_MAX_EVENTS_PROPERTY, "100"));
-        if (BATCHING_ENABLED && !BATCHING_SCHEDULER_STARTED) {
-            BATCHING_SCHEDULER_STARTED = true;
+        if (BATCHING_ENABLED && !batchingSchedulerStarted) {
+            batchingSchedulerStarted = true;
 
             final Runnable flushAction = new Runnable() {
                 @Override
