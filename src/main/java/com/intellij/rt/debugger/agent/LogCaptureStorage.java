@@ -45,14 +45,14 @@ public class LogCaptureStorage {
     static final AtomicLong LAST_LOGGING_BREAKPOINT_EVENT_ID = new AtomicLong(-1);
 
     static class Event {
-        public static final int STD_OUTPUT_TYPE = 0;
-        public static final int LOGGING_BREAKPOINT_TYPE = 1;
+        public static final byte STD_OUTPUT_TYPE = 0;
+        public static final byte LOGGING_BREAKPOINT_TYPE = 1;
 
         public final long id;
-        public final int type;
+        public final byte type;
         public final byte[] payload;
 
-        public Event(long id, int type, byte[] payload) {
+        public Event(long id, byte type, byte[] payload) {
             this.id = id;
             this.type = type;
             this.payload = payload;
@@ -196,7 +196,7 @@ public class LogCaptureStorage {
             dos.writeInt(events.size());
             for (Event event : events) {
                 dos.writeLong(event.id);
-                dos.writeInt(event.type);
+                dos.writeByte(event.type);
                 byte[] bytes = event.payload;
                 dos.writeInt(bytes.length);
                 dos.write(bytes);

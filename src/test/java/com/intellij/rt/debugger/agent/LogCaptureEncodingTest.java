@@ -128,7 +128,7 @@ public class LogCaptureEncodingTest {
 
     private static void readAndCheckStdoutEvent(int expectedId, String expectedMsg, DataInputStream is) throws IOException {
         assertEquals(expectedId, is.readLong());
-        assertEquals(LogCaptureStorage.Event.STD_OUTPUT_TYPE, is.readInt());
+        assertEquals(LogCaptureStorage.Event.STD_OUTPUT_TYPE, is.readByte());
         try (DataInputStream eis = new DataInputStream(new ByteArrayInputStream(readBytesWithSize(is)))) {
             readAndCheckMessageAndStack(expectedMsg, eis);
         }
@@ -139,7 +139,7 @@ public class LogCaptureEncodingTest {
                                                            String expectedMsg,
                                                            DataInputStream is) throws IOException {
         assertEquals(expectedId, is.readLong());
-        assertEquals(LogCaptureStorage.Event.LOGGING_BREAKPOINT_TYPE, is.readInt());
+        assertEquals(LogCaptureStorage.Event.LOGGING_BREAKPOINT_TYPE, is.readByte());
         try (DataInputStream eis = new DataInputStream(new ByteArrayInputStream(readBytesWithSize(is)))) {
             assertEquals(expectedInstrumentationId, eis.readInt());
             readAndCheckMessageAndStack(expectedMsg, eis);
