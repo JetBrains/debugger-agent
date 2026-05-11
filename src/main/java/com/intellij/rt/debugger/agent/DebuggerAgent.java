@@ -64,7 +64,13 @@ public class DebuggerAgent {
     CollectionBreakpointInstrumentor.init(properties, instrumentation);
     SpilledVariablesTransformer.init(instrumentation);
     TailCallContinuationTransformer.init(instrumentation);
-    LogCaptureTransformer.init(properties, instrumentation);
+
+    boolean logCaptureEnabled = Boolean.getBoolean("debugger.agent.enable.log.capture");
+    LogCaptureStorage.init(properties, logCaptureEnabled);
+    if (logCaptureEnabled) {
+      LogCaptureTransformer.init(instrumentation);
+    }
+
     InstrumentationBreakpointTransformer.init(properties, instrumentation);
   }
 

@@ -1,5 +1,6 @@
 package com.intellij.rt.debugger.agent;
 
+import org.junit.Before;
 import org.junit.Test;
 
 import java.io.ByteArrayInputStream;
@@ -12,44 +13,144 @@ import java.util.Properties;
 import java.util.zip.GZIPInputStream;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
 public class LogCaptureEncodingTest {
+    private final Properties properties = new Properties();
+
+    @Before
+    public void setUp() {
+        assertEquals(
+                "Please disable the agent if you try to debug this test. " +
+                        "Otherwise, you debug the bundled agent and not the code in the project.",
+                this.getClass().getClassLoader(), LogCaptureStorage.class.getClassLoader());
+        resetLogCaptureStorage();
+        properties.put(LogCaptureStorage.BATCHING_ENABLED_PROPERTY, "true");
+        properties.put(LogCaptureStorage.BATCHING_FLUSH_PERIOD_PROPERTY, "999999999"); // never
+        LogCaptureStorage.outputWrittenDumpForTests = new ArrayList<>();
+
+    }
 
     @Test
-    public void test() throws Exception {
-        // Please disable the agent if you try to debug this test.
-        // Otherwise, you debug the bundled agent and not the code in the project.
-        assertEquals(this.getClass().getClassLoader(), LogCaptureStorage.class.getClassLoader());
-
-        Properties properties = new Properties();
-        properties.put(LogCaptureStorage.BATCHING_ENABLED_PROPERTY, "true");
+    public void batchesCapturedStdoutEvents() throws Exception {
         properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1"); // 1 is ok, 2 is a signal to flush
-        properties.put(LogCaptureStorage.BATCHING_FLUSH_PERIOD_PROPERTY, "999999999"); // never
-        LogCaptureStorage.init(properties);
-        LogCaptureStorage.outputWrittenDumpForTests = new ArrayList<>();
+        LogCaptureStorage.init(properties, true);
 
         LogCaptureStorage.capture(FileDescriptor.out, "aaa\n".getBytes(StandardCharsets.UTF_8));
         assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
         LogCaptureStorage.capture(FileDescriptor.out, "bbb\n".getBytes(StandardCharsets.UTF_8));
         assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
-        String output = LogCaptureStorage.outputWrittenDumpForTests.get(0);
 
-        try (DataInputStream is = new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(output.getBytes(StandardCharsets.ISO_8859_1))))) {
+        try (DataInputStream is = openDump(0)) {
             assertEquals(2, is.readInt()); // count
-            readAndCheckEvent(0, "aaa\n", is);
-            readAndCheckEvent(1, "bbb\n", is);
+            readAndCheckStdoutEvent(0, "aaa\n", is);
+            readAndCheckStdoutEvent(1, "bbb\n", is);
         }
     }
 
-    private static void readAndCheckEvent(int expectedId, String expectedMsg, DataInputStream is) throws IOException {
-        assertEquals(expectedId, is.readLong());
-        byte[] msgAndStackTrace = readBytesWithSize(is);
-        try (DataInputStream eis = new DataInputStream(new ByteArrayInputStream(msgAndStackTrace))) {
-            byte[] msgBytes = readBytesWithSize(eis);
-            String msg = new String(msgBytes, StandardCharsets.UTF_8);
-            assertEquals(expectedMsg, msg);
-            // don't hassle with stack trace
+    @Test
+    public void batchesLoggingBreakpointEvents() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1"); // 1 is ok, 2 is a signal to flush
+        LogCaptureStorage.init(properties, false);
+
+        LogCaptureStorage.loggingBreakpointHit(11, "first message");
+        assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
+        LogCaptureStorage.loggingBreakpointHit(22, "second message");
+        assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        try (DataInputStream is = openDump(0)) {
+            assertEquals(2, is.readInt()); // count
+            readAndCheckLoggingBreakpointEvent(0, 11, "first message", is);
+            readAndCheckLoggingBreakpointEvent(1, 22, "second message", is);
         }
+    }
+
+    @Test
+    public void stdoutCaptureFlushesPendingLoggingBreakpointEventsFirst() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "100");
+        LogCaptureStorage.init(properties, true);
+
+        LogCaptureStorage.loggingBreakpointHit(33, "before stdout");
+        assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        LogCaptureStorage.capture(FileDescriptor.out, "stdout\n".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
+        try (DataInputStream is = openDump(0)) {
+            assertEquals(1, is.readInt()); // count
+            readAndCheckLoggingBreakpointEvent(0, 33, "before stdout", is);
+        }
+    }
+
+    @Test
+    public void stdoutFlushHookWorksWhenStdoutCaptureIsDisabled() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "100");
+        LogCaptureStorage.init(properties, false);
+
+        LogCaptureStorage.loggingBreakpointHit(44, "before ignored stdout");
+        LogCaptureStorage.capture(FileDescriptor.out, "stdout\n".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
+        try (DataInputStream is = openDump(0)) {
+            assertEquals(1, is.readInt()); // count
+            readAndCheckLoggingBreakpointEvent(0, 44, "before ignored stdout", is);
+        }
+    }
+
+    @Test
+    public void keepsEventIdsAndOrderingAcrossMultipleFlushes() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1"); // 1 is ok, 2 is a signal to flush
+        LogCaptureStorage.init(properties, true);
+
+        LogCaptureStorage.loggingBreakpointHit(55, "first log");
+        LogCaptureStorage.capture(FileDescriptor.out, "first stdout\n".getBytes(StandardCharsets.UTF_8));
+        assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        LogCaptureStorage.loggingBreakpointHit(66, "second log");
+        LogCaptureStorage.capture(FileDescriptor.out, "second stdout\n".getBytes(StandardCharsets.UTF_8));
+        assertEquals(2, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        try (DataInputStream is = openDump(0)) {
+            assertEquals(1, is.readInt()); // count
+            readAndCheckLoggingBreakpointEvent(0, 55, "first log", is);
+        }
+        try (DataInputStream is = openDump(1)) {
+            assertEquals(2, is.readInt()); // count
+            readAndCheckStdoutEvent(1, "first stdout\n", is);
+            readAndCheckLoggingBreakpointEvent(2, 66, "second log", is);
+        }
+    }
+
+    private static DataInputStream openDump(int index) throws IOException {
+        String output = LogCaptureStorage.outputWrittenDumpForTests.get(index);
+        return new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(output.getBytes(StandardCharsets.ISO_8859_1))));
+    }
+
+    private static void readAndCheckStdoutEvent(int expectedId, String expectedMsg, DataInputStream is) throws IOException {
+        assertEquals(expectedId, is.readLong());
+        assertEquals(LogCaptureStorage.Event.STD_OUTPUT_TYPE, is.readByte());
+        try (DataInputStream eis = new DataInputStream(new ByteArrayInputStream(readBytesWithSize(is)))) {
+            readAndCheckMessageAndStack(expectedMsg, eis);
+        }
+    }
+
+    private static void readAndCheckLoggingBreakpointEvent(int expectedId,
+                                                           int expectedInstrumentationId,
+                                                           String expectedMsg,
+                                                           DataInputStream is) throws IOException {
+        assertEquals(expectedId, is.readLong());
+        assertEquals(LogCaptureStorage.Event.LOGGING_BREAKPOINT_TYPE, is.readByte());
+        try (DataInputStream eis = new DataInputStream(new ByteArrayInputStream(readBytesWithSize(is)))) {
+            assertEquals(expectedInstrumentationId, eis.readInt());
+            readAndCheckMessageAndStack(expectedMsg, eis);
+        }
+    }
+
+    private static void readAndCheckMessageAndStack(String expectedMsg, DataInputStream is) throws IOException {
+        byte[] msgBytes = readBytesWithSize(is);
+        String msg = new String(msgBytes, StandardCharsets.UTF_8);
+        assertEquals(expectedMsg, msg);
+        assertTrue("expected encoded stack trace after message", is.available() > 0);
     }
 
     private static byte[] readBytesWithSize(DataInputStream is) throws IOException {
@@ -60,5 +161,13 @@ public class LogCaptureEncodingTest {
             bytes[i] = is.readByte();
         }
         return bytes;
+    }
+
+    private static void resetLogCaptureStorage() {
+        LogCaptureStorage.EVENT_COUNTER.set(0);
+        LogCaptureStorage.LAST_FLUSHED_EVENT_ID.set(-1);
+        LogCaptureStorage.LAST_LOGGING_BREAKPOINT_EVENT_ID.set(-1);
+        LogCaptureStorage.EVENTS.clear();
+        LogCaptureStorage.outputWrittenDumpForTests = null;
     }
 }
