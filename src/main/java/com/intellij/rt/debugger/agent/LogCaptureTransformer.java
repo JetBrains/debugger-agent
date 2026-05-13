@@ -4,6 +4,7 @@ import org.jetbrains.capture.org.objectweb.asm.ClassVisitor;
 import org.jetbrains.capture.org.objectweb.asm.ClassWriter;
 import org.jetbrains.capture.org.objectweb.asm.MethodVisitor;
 import org.jetbrains.capture.org.objectweb.asm.Opcodes;
+import org.jetbrains.capture.org.objectweb.asm.tree.*;
 
 import java.io.FileOutputStream;
 import java.lang.instrument.ClassFileTransformer;
@@ -43,7 +44,7 @@ class LogCaptureTransformer implements ClassFileTransformer {
                 return transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
                     @Override
                     public MethodVisitor visitMethod(final int access, String name, String descriptor, String signature, String[] exceptions) {
-                        MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
+                        final MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
                         if (!"write".equals(name)) return superMethodVisitor;
 
                         // There are also versions like (B)V, but they are uninteresting in terms of logging capture.
@@ -59,23 +60,11 @@ class LogCaptureTransformer implements ClassFileTransformer {
                                 return superMethodVisitor;
                         }
 
-                        return new MethodVisitor(api, superMethodVisitor) {
+                        return new MethodNode(api, access, name, descriptor, signature, exceptions) {
                             @Override
-                            public void visitCode() {
-                                super.visitCode();
-                                mv.visitVarInsn(Opcodes.ALOAD, 0);
-                                mv.visitFieldInsn(Opcodes.GETFIELD,
-                                        "java/io/FileOutputStream",
-                                        "fd", "Ljava/io/FileDescriptor;");
-                                mv.visitVarInsn(Opcodes.ALOAD, 1);
-                                if (isWithOffset) {
-                                    mv.visitVarInsn(Opcodes.ILOAD, 2);
-                                    mv.visitVarInsn(Opcodes.ILOAD, 3);
-                                }
-                                mv.visitMethodInsn(Opcodes.INVOKESTATIC,
-                                        getInternalClsName(LogCaptureStorage.class),
-                                        "capture", "(Ljava/io/FileDescriptor;[B" + (isWithOffset ? "II" : "") + ")V",
-                                        false);
+                            public void visitEnd() {
+                                insertCaptureCall(instructions, isWithOffset);
+                                accept(superMethodVisitor);
                             }
                         };
                     }
@@ -87,5 +76,42 @@ class LogCaptureTransformer implements ClassFileTransformer {
             }
         }
         return null;
+    }
+
+    private static void insertCaptureCall(InsnList instructions, boolean isWithOffset) {
+        InsnList captureCall = createCaptureCall(isWithOffset);
+        AbstractInsnNode firstLineNumber = findFirstLineNumber(instructions);
+        if (firstLineNumber != null) {
+            instructions.insert(firstLineNumber, captureCall);
+        } else {
+            instructions.insert(captureCall);
+        }
+    }
+
+    private static AbstractInsnNode findFirstLineNumber(InsnList instructions) {
+        for (AbstractInsnNode instruction = instructions.getFirst(); instruction != null; instruction = instruction.getNext()) {
+            if (instruction instanceof LineNumberNode) {
+                return instruction;
+            }
+        }
+        return null;
+    }
+
+    private static InsnList createCaptureCall(boolean isWithOffset) {
+        InsnList instructions = new InsnList();
+        instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        instructions.add(new FieldInsnNode(Opcodes.GETFIELD,
+                "java/io/FileOutputStream",
+                "fd", "Ljava/io/FileDescriptor;"));
+        instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
+        if (isWithOffset) {
+            instructions.add(new VarInsnNode(Opcodes.ILOAD, 2));
+            instructions.add(new VarInsnNode(Opcodes.ILOAD, 3));
+        }
+        instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC,
+                getInternalClsName(LogCaptureStorage.class),
+                "capture", "(Ljava/io/FileDescriptor;[B" + (isWithOffset ? "II" : "") + ")V",
+                false));
+        return instructions;
     }
 }
