@@ -79,26 +79,32 @@ class LogCaptureTransformer implements ClassFileTransformer {
     }
 
     private static void insertCaptureCall(InsnList instructions, boolean isWithOffset) {
-        InsnList captureCall = createCaptureCall(isWithOffset);
-        AbstractInsnNode firstLineNumber = findFirstLineNumber(instructions);
-        if (firstLineNumber != null) {
-            instructions.insert(firstLineNumber, captureCall);
-        } else {
-            instructions.insert(captureCall);
-        }
+        LineNumberNode firstLineNumber = findFirstLineNumber(instructions);
+        InsnList captureCall = createCaptureCall(firstLineNumber, isWithOffset);
+        instructions.insert(captureCall);
     }
 
-    private static AbstractInsnNode findFirstLineNumber(InsnList instructions) {
+    private static LineNumberNode findFirstLineNumber(InsnList instructions) {
         for (AbstractInsnNode instruction = instructions.getFirst(); instruction != null; instruction = instruction.getNext()) {
             if (instruction instanceof LineNumberNode) {
-                return instruction;
+                return (LineNumberNode) instruction;
             }
         }
         return null;
     }
 
-    private static InsnList createCaptureCall(boolean isWithOffset) {
+    /**
+     * Generates capture call bytecode with a line number mark (if <code>lineNumber</code> is not null).
+     * <p>
+     * It makes the instrumented code have a valid line number when a stack trace is collected.
+     */
+    private static InsnList createCaptureCall(LineNumberNode lineNumber, boolean isWithOffset) {
         InsnList instructions = new InsnList();
+        if (lineNumber != null) {
+            LabelNode labelNode = new LabelNode();
+            instructions.add(new LineNumberNode(lineNumber.line, labelNode));
+            instructions.add(labelNode);
+        }
         instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         instructions.add(new FieldInsnNode(Opcodes.GETFIELD,
                 "java/io/FileOutputStream",
