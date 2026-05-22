@@ -13,8 +13,7 @@ import java.util.List;
 import java.util.Properties;
 import java.util.zip.GZIPInputStream;
 
-import static org.junit.Assert.assertEquals;
-import static org.junit.Assert.assertTrue;
+import static org.junit.Assert.*;
 
 public class LogCaptureEncodingTest {
     private final Properties properties = new Properties();
@@ -122,9 +121,68 @@ public class LogCaptureEncodingTest {
         }
     }
 
+    @Test
+    public void packBatchedDataReturnsNullWhenNoEventsPending() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "100");
+        LogCaptureStorage.init(properties, true);
+
+        assertNull(LogCaptureStorage.packBatchedData());
+    }
+
+    @Test
+    public void packBatchedDataEncodesEventsWithoutDrainingThem() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "100");
+        LogCaptureStorage.init(properties, true);
+
+        LogCaptureStorage.loggingBreakpointHit(77, "first log");
+        LogCaptureStorage.loggingBreakpointHit(88, "second log");
+
+        // Sanity: nothing has been auto-flushed yet (limit is high).
+        assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        String packed = LogCaptureStorage.packBatchedData();
+        assertNotNull(packed);
+
+        // The packed string decodes to the events we added, in id order.
+        try (DataInputStream is = openPacked(packed)) {
+            assertEquals(2, is.readInt());
+            readAndCheckLoggingBreakpointEvent(0, 77, "first log", is);
+            readAndCheckLoggingBreakpointEvent(1, 88, "second log", is);
+        }
+
+        // EVENTS is not drained.
+        assertEquals(2, LogCaptureStorage.EVENTS.size());
+        assertEquals(-1, LogCaptureStorage.LAST_FLUSHED_EVENT_ID.get());
+
+        // outputWritten() was not invoked — pack only returns, never sends.
+        assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        // Calling pack again yields the same encoded content (no internal state changed).
+        String packed2 = LogCaptureStorage.packBatchedData();
+        assertNotNull(packed2);
+        try (DataInputStream is = openPacked(packed2)) {
+            assertEquals(2, is.readInt());
+            readAndCheckLoggingBreakpointEvent(0, 77, "first log", is);
+            readAndCheckLoggingBreakpointEvent(1, 88, "second log", is);
+        }
+
+        // A subsequent real flush still drains the same events normally.
+        LogCaptureStorage.capture(FileDescriptor.out, "trigger\n".getBytes(StandardCharsets.UTF_8));
+        // capture flushes pending logging-breakpoint events first.
+        assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
+        try (DataInputStream is = openDump(0)) {
+            assertEquals(2, is.readInt());
+            readAndCheckLoggingBreakpointEvent(0, 77, "first log", is);
+            readAndCheckLoggingBreakpointEvent(1, 88, "second log", is);
+        }
+    }
+
+    static DataInputStream openPacked(String packed) throws IOException {
+        return new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(packed.getBytes(StandardCharsets.ISO_8859_1))));
+    }
+
     static DataInputStream openDump(int index) throws IOException {
-        String output = LogCaptureStorage.outputWrittenDumpForTests.get(index);
-        return new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(output.getBytes(StandardCharsets.ISO_8859_1))));
+        return openPacked(LogCaptureStorage.outputWrittenDumpForTests.get(index));
     }
 
     static List<StackTraceElement> readAndCheckStdoutEvent(int expectedId, String expectedMsg, DataInputStream is) throws IOException {

@@ -172,9 +172,19 @@ public class LogCaptureStorage {
         e.printStackTrace(System.err);
     }
 
-    // It's used by the debugger.
     private static void flushBatchedData() throws IOException {
         flushBatchedDataIfMoreThan(0);
+    }
+
+    /**
+     * It's used by the debugger via evaluation.
+     * This method intentionally does not clear the collected data because the return value may be collected
+     * before it appears on the debugger side. The clearing happens in the periodic flush cycle.
+     */
+    static String packBatchedData() throws IOException {
+        ArrayList<Event> eventsSnapshot = new ArrayList<>(EVENTS);
+        if (eventsSnapshot.isEmpty()) return null;
+        return pack(eventsSnapshot);
     }
 
     private static void flushBatchedDataIfMoreThan(int eventsCountLimit) throws IOException {
@@ -194,6 +204,10 @@ public class LogCaptureStorage {
     }
 
     private static void packAndSend(Collection<Event> events) throws IOException {
+        outputWritten(pack(events));
+    }
+
+    private static String pack(Collection<Event> events) throws IOException {
         assert !events.isEmpty();
 
         ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
@@ -209,12 +223,10 @@ public class LogCaptureStorage {
             }
         }
         // ensure to close the gzip stream before extracting compressed data.
-        String packed = bas.toString(StandardCharsets.ISO_8859_1.name());
-        outputWritten(packed);
+        return bas.toString(StandardCharsets.ISO_8859_1.name());
     }
 
     // It's used by the debugger.
-    @SuppressWarnings("unused")
     private static void outputWritten(String captured) {
         if (outputWrittenDumpForTests != null) {
             outputWrittenDumpForTests.add(captured);
