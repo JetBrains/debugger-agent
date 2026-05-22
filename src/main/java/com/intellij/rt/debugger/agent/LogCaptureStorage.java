@@ -178,7 +178,13 @@ public class LogCaptureStorage {
     }
 
     private static void flushBatchedDataIfMoreThan(int eventsCountLimit) throws IOException {
-        if (EVENTS.size() <= eventsCountLimit) return;
+        if (eventsCountLimit > 0) {
+            // This is an approximation, but eventsCountLimit is considered non-strict when it is not 0.
+            // The exact size is checked below.
+            // N.B. EVENTS.size() takes linear time, so it can be very slow.
+            long currentSize = EVENT_COUNTER.get() - 1 - LAST_FLUSHED_EVENT_ID.get();
+            if (currentSize <= eventsCountLimit) return;
+        }
         ArrayList<Event> eventsSnapshot = new ArrayList<>(EVENTS);
         if (eventsSnapshot.size() <= eventsCountLimit) return;
         packAndSend(eventsSnapshot);
