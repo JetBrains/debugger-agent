@@ -36,15 +36,19 @@ public class LogCaptureEncodingTest {
         properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1"); // 1 is ok, 2 is a signal to flush
         LogCaptureStorage.init(properties, true);
 
-        LogCaptureStorage.capture(FileDescriptor.out, "aaa\n".getBytes(StandardCharsets.UTF_8));
-        assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
-        LogCaptureStorage.capture(FileDescriptor.out, "bbb\n".getBytes(StandardCharsets.UTF_8));
-        assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
+        capture(new FileDescriptor() /* some non-standard FD */, "xxx\n");
+        assertEquals("not captured at all", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        capture(FileDescriptor.out, "aaa\n");
+        assertEquals("no flush yet", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        capture(FileDescriptor.err, "bbb\n");
+        assertEquals("flushed", 1, LogCaptureStorage.outputWrittenDumpForTests.size());
 
         try (DataInputStream is = openDump(0)) {
             assertEquals(2, is.readInt()); // count
-            readAndCheckStdoutEvent(0, "aaa\n", is);
-            readAndCheckStdoutEvent(1, "bbb\n", is);
+            readAndCheckStdoutEvent(0, false, "aaa\n", is);
+            readAndCheckStdoutEvent(1, true, "bbb\n", is);
         }
     }
 
@@ -73,7 +77,7 @@ public class LogCaptureEncodingTest {
         LogCaptureStorage.loggingBreakpointHit(33, "before stdout");
         assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
 
-        LogCaptureStorage.capture(FileDescriptor.out, "stdout\n".getBytes(StandardCharsets.UTF_8));
+        capture(FileDescriptor.out, "stdout\n");
 
         assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
         try (DataInputStream is = openDump(0)) {
@@ -88,7 +92,7 @@ public class LogCaptureEncodingTest {
         LogCaptureStorage.init(properties, false);
 
         LogCaptureStorage.loggingBreakpointHit(44, "before ignored stdout");
-        LogCaptureStorage.capture(FileDescriptor.out, "stdout\n".getBytes(StandardCharsets.UTF_8));
+        capture(FileDescriptor.out, "stdout\n");
 
         assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
         try (DataInputStream is = openDump(0)) {
@@ -103,11 +107,11 @@ public class LogCaptureEncodingTest {
         LogCaptureStorage.init(properties, true);
 
         LogCaptureStorage.loggingBreakpointHit(55, "first log");
-        LogCaptureStorage.capture(FileDescriptor.out, "first stdout\n".getBytes(StandardCharsets.UTF_8));
+        capture(FileDescriptor.out, "first stdout\n");
         assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
 
         LogCaptureStorage.loggingBreakpointHit(66, "second log");
-        LogCaptureStorage.capture(FileDescriptor.out, "second stdout\n".getBytes(StandardCharsets.UTF_8));
+        capture(FileDescriptor.out, "second stdout\n");
         assertEquals(2, LogCaptureStorage.outputWrittenDumpForTests.size());
 
         try (DataInputStream is = openDump(0)) {
@@ -116,7 +120,7 @@ public class LogCaptureEncodingTest {
         }
         try (DataInputStream is = openDump(1)) {
             assertEquals(2, is.readInt()); // count
-            readAndCheckStdoutEvent(1, "first stdout\n", is);
+            readAndCheckStdoutEvent(1, false, "first stdout\n", is);
             readAndCheckLoggingBreakpointEvent(2, 66, "second log", is);
         }
     }
@@ -167,7 +171,7 @@ public class LogCaptureEncodingTest {
         }
 
         // A subsequent real flush still drains the same events normally.
-        LogCaptureStorage.capture(FileDescriptor.out, "trigger\n".getBytes(StandardCharsets.UTF_8));
+        capture(FileDescriptor.out, "trigger\n");
         // capture flushes pending logging-breakpoint events first.
         assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
         try (DataInputStream is = openDump(0)) {
@@ -185,11 +189,14 @@ public class LogCaptureEncodingTest {
         return openPacked(LogCaptureStorage.outputWrittenDumpForTests.get(index));
     }
 
-    static List<StackTraceElement> readAndCheckStdoutEvent(int expectedId, String expectedMsg, DataInputStream is) throws IOException {
+    static List<StackTraceElement> readAndCheckStdoutEvent(int expectedId,
+                                                           boolean expectedIsErr,
+                                                           String expectedMsg,
+                                                           DataInputStream is) throws IOException {
         assertEquals(expectedId, is.readLong());
         assertEquals(LogCaptureStorage.Event.STD_OUTPUT_TYPE, is.readByte());
         try (DataInputStream eis = new DataInputStream(new ByteArrayInputStream(readBytesWithSize(is)))) {
-            return readAndCheckMessageAndStack(expectedMsg, eis);
+            return readAndCheckStdoutMessageAndStack(expectedMsg, expectedIsErr, eis);
         }
     }
 
@@ -209,6 +216,20 @@ public class LogCaptureEncodingTest {
         byte[] msgBytes = readBytesWithSize(is);
         String msg = new String(msgBytes, StandardCharsets.UTF_8);
         assertEquals(expectedMsg, msg);
+        return readStackFrames(is);
+    }
+
+    static List<StackTraceElement> readAndCheckStdoutMessageAndStack(String expectedMsg,
+                                                                     boolean expectedIsErr,
+                                                                     DataInputStream is) throws IOException {
+        byte[] msgBytes = readBytesWithSize(is);
+        String msg = new String(msgBytes, StandardCharsets.UTF_8);
+        assertEquals(expectedMsg, msg);
+        assertEquals(expectedIsErr, is.readBoolean());
+        return readStackFrames(is);
+    }
+
+    private static List<StackTraceElement> readStackFrames(DataInputStream is) throws IOException {
         assertTrue("expected encoded stack trace after message", is.available() > 0);
         ArrayList<StackTraceElement> stack = new ArrayList<>();
         while (is.available() > 0) {
@@ -230,6 +251,10 @@ public class LogCaptureEncodingTest {
             bytes[i] = is.readByte();
         }
         return bytes;
+    }
+
+    private static void capture(FileDescriptor fd, String text) {
+        LogCaptureStorage.capture(fd, text.getBytes(StandardCharsets.UTF_8));
     }
 
     static void resetLogCaptureStorage() {

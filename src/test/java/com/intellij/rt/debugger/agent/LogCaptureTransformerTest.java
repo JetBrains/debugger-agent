@@ -198,7 +198,7 @@ public class LogCaptureTransformerTest {
         Assert.assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
         try (DataInputStream is = LogCaptureEncodingTest.openDump(0)) {
             Assert.assertEquals(1, is.readInt()); // count
-            List<StackTraceElement> stack = LogCaptureEncodingTest.readAndCheckStdoutEvent(-1, expectedMsg, is);
+            List<StackTraceElement> stack = LogCaptureEncodingTest.readAndCheckStdoutEvent(-1, false, expectedMsg, is);
             Assert.assertFalse("expected captured stack", stack.isEmpty());
             return stack.get(0);
         }

@@ -127,10 +127,14 @@ public class LogCaptureStorage {
             }
             if (!STDOUT_CAPTURE_ENABLED) return;
 
+            boolean isErr = fd == FD_ERR;
             long id = createNextEventId(Event.STD_OUTPUT_TYPE);
             ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
             try (DataOutputStream dos = new DataOutputStream(bas)) {
-                encodeMessageAndCurrentStacks(dos, bytes, off, len);
+                dos.writeInt(len);
+                dos.write(bytes, off, len);
+                dos.writeBoolean(isErr);
+                writeCurrentStacks(dos);
             }
             byte[] payload = bas.toByteArray();
             captureEvent(new Event(id, Event.STD_OUTPUT_TYPE, payload));
@@ -154,11 +158,9 @@ public class LogCaptureStorage {
         }
     }
 
-    private static void encodeMessageAndCurrentStacks(DataOutputStream dos, byte[] bytes, int off, int len) throws IOException {
+    private static void writeCurrentStacks(DataOutputStream dos) throws IOException {
         List<StackTraceElement> regularStack = CaptureStorage.getCurrentStackTraceWithoutAgentFrames();
         List<StackTraceElement> capturedStack = CaptureStorage.getCurrentCapturedStack(MAX_STACK_DEPTH - regularStack.size());
-        dos.writeInt(len);
-        dos.write(bytes, off, len);
         CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
         if (capturedStack != null) {
             CaptureStorage.writeAsyncStackTraceElementToStream(CaptureStorage.ASYNC_STACK_ELEMENT, dos);
@@ -243,7 +245,9 @@ public class LogCaptureStorage {
             ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
             try (DataOutputStream dos = new DataOutputStream(bas)) {
                 dos.writeInt(instrumentationId);
-                encodeMessageAndCurrentStacks(dos, messageBytes, 0, messageBytes.length);
+                dos.writeInt(messageBytes.length);
+                dos.write(messageBytes);
+                writeCurrentStacks(dos);
             }
             byte[] payload = bas.toByteArray();
             captureEvent(new Event(id, Event.LOGGING_BREAKPOINT_TYPE, payload));
