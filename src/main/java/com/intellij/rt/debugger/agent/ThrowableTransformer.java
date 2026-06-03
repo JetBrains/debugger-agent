@@ -1,6 +1,7 @@
 package com.intellij.rt.debugger.agent;
 
 import org.jetbrains.capture.org.objectweb.asm.ClassVisitor;
+import org.jetbrains.capture.org.objectweb.asm.FieldVisitor;
 import org.jetbrains.capture.org.objectweb.asm.ClassWriter;
 import org.jetbrains.capture.org.objectweb.asm.MethodVisitor;
 import org.jetbrains.capture.org.objectweb.asm.Opcodes;
@@ -23,16 +24,36 @@ class ThrowableTransformer implements ClassFileTransformer {
                 ClassTransformer transformer = new ClassTransformer(className, classfileBuffer, ClassWriter.COMPUTE_FRAMES, loader);
 
                 return transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
+                    private String myBacktraceFieldName;
+                    private String myBacktraceFieldDescriptor;
+
+                    @Override
+                    public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
+                        if (isBacktraceField(name, descriptor)) {
+                            myBacktraceFieldName = name;
+                            myBacktraceFieldDescriptor = descriptor;
+                        }
+                        return super.visitField(access, name, descriptor, signature, value);
+                    }
+
                     @Override
                     public MethodVisitor visitMethod(final int access, String name, String descriptor, String signature, String[] exceptions) {
                         MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
                         switch (name) {
                             case "<init>":
-                                // Insert call of CaptureStorage.captureThrowable(this) in the end of constructors.
+                                // Insert CaptureStorage calls in the end of constructors.
                                 return new MethodVisitor(api, superMethodVisitor) {
                                     @Override
                                     public void visitInsn(int opcode) {
                                         if (opcode == Opcodes.RETURN) {
+                                            if (myBacktraceFieldName != null) {
+                                                mv.visitVarInsn(Opcodes.ALOAD, 0);
+                                                mv.visitFieldInsn(Opcodes.GETFIELD, THROWABLE_NAME, myBacktraceFieldName, myBacktraceFieldDescriptor);
+                                                CaptureAgent.invokeStorageMethod(mv, "captureThrowableBacktrace");
+                                            }
+                                            else {
+                                                ThrowableInterner.disable("Capture agent: cannot capture Throwable backtrace, no supported backtrace field was found");
+                                            }
                                             mv.visitVarInsn(Opcodes.ALOAD, 0);
                                             CaptureAgent.invokeStorageMethod(mv, "captureThrowable");
                                         }
@@ -69,5 +90,10 @@ class ThrowableTransformer implements ClassFileTransformer {
             }
         }
         return null;
+    }
+
+    private static boolean isBacktraceField(String name, String descriptor) {
+        if (!"backtrace".equals(name) && !"walkback".equals(name)) return false;
+        return descriptor.startsWith("L") || descriptor.startsWith("[");
     }
 }

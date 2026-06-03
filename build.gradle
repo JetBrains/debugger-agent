@@ -18,6 +18,12 @@ dependencies {
     testImplementation("org.openjdk.jmh:jmh-core:1.37")
 }
 
+test {
+    if (JavaVersion.current().isJava9Compatible()) {
+        jvmArgs "--add-opens=java.base/java.lang=ALL-UNNAMED"
+    }
+}
+
 task mainJar(type: Jar) {
     from configurations.runtimeClasspath.collect { it.isDirectory() ? it : zipTree(it) }
     with jar

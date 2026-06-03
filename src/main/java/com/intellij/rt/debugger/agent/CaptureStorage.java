@@ -125,6 +125,11 @@ public final class CaptureStorage {
   }
 
   @SuppressWarnings("unused")
+  public static void captureThrowableBacktrace(Object backtrace) {
+    ThrowableInterner.captureBacktrace(backtrace);
+  }
+
+  @SuppressWarnings("unused")
   public static void captureThrowable(final Throwable throwable) {
     final ThreadLocalContext context = CURRENT_CONTEXT.get();
     if (!ENABLED || context.throwableCaptureDisabled) {

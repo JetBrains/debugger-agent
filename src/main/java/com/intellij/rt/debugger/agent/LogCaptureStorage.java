@@ -158,7 +158,7 @@ public class LogCaptureStorage {
                 dos.writeBoolean(isErr);
             }
             byte[] payload = bas.toByteArray();
-            captureEvent(new Event(id, Event.STD_OUTPUT_TYPE, payload, new Throwable(), CaptureStorage.getCurrentCapturedStack()));
+            captureEvent(new Event(id, Event.STD_OUTPUT_TYPE, payload, ThrowableInterner.createThrowable(), CaptureStorage.getCurrentCapturedStack()));
         } catch (Throwable e) {
             handleException(e);
         } finally {
@@ -311,7 +311,7 @@ public class LogCaptureStorage {
                 dos.write(messageBytes);
             }
             byte[] payload = bas.toByteArray();
-            captureEvent(new Event(id, Event.LOGGING_BREAKPOINT_TYPE, payload, new Throwable(), CaptureStorage.getCurrentCapturedStack()));
+            captureEvent(new Event(id, Event.LOGGING_BREAKPOINT_TYPE, payload, ThrowableInterner.createThrowable(), CaptureStorage.getCurrentCapturedStack()));
         } catch (Throwable e) {
             handleException(e);
         } finally {
