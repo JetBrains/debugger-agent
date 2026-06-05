@@ -16,6 +16,8 @@ import java.util.zip.GZIPInputStream;
 import static org.junit.Assert.*;
 
 public class LogCaptureEncodingTest {
+    private static final String LARGE_PACKED_BYTE_LIMIT = String.valueOf(5 * 1024 * 1024);
+
     private final Properties properties = new Properties();
 
     @Before
@@ -27,6 +29,7 @@ public class LogCaptureEncodingTest {
         resetLogCaptureStorage();
         properties.put(LogCaptureStorage.BATCHING_ENABLED_PROPERTY, "true");
         properties.put(LogCaptureStorage.BATCHING_FLUSH_PERIOD_PROPERTY, "999999999"); // never
+        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, "0");
         LogCaptureStorage.outputWrittenDumpForTests = new ArrayList<>();
 
     }
@@ -134,7 +137,7 @@ public class LogCaptureEncodingTest {
     }
 
     @Test
-    public void packBatchedDataEncodesEventsWithoutDrainingThem() throws Exception {
+    public void packBatchedDataEncodesEventsWithoutSendingThem() throws Exception {
         properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "100");
         LogCaptureStorage.init(properties, true);
 
@@ -148,23 +151,23 @@ public class LogCaptureEncodingTest {
         assertNotNull(packed);
 
         // The packed string decodes to the events we added, in id order.
-        try (DataInputStream is = openPacked(packed)) {
+        try (DataInputStream is = openPackedBatch(packed)) {
             assertEquals(2, is.readInt());
             readAndCheckLoggingBreakpointEvent(0, 77, "first log", is);
             readAndCheckLoggingBreakpointEvent(1, 88, "second log", is);
         }
 
-        // EVENTS is not drained.
-        assertEquals(2, LogCaptureStorage.EVENTS.size());
+        assertEquals("raw events are packed for future debugger reads", 0, LogCaptureStorage.EVENTS.size());
+        assertEquals("packed data stays queued", 1, LogCaptureStorage.PACKED_BATCHES.size());
         assertEquals(-1, LogCaptureStorage.LAST_FLUSHED_EVENT_ID.get());
 
         // outputWritten() was not invoked — pack only returns, never sends.
         assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
 
-        // Calling pack again yields the same encoded content (no internal state changed).
+        // Calling pack again yields the same encoded content.
         String packed2 = LogCaptureStorage.packBatchedData();
         assertNotNull(packed2);
-        try (DataInputStream is = openPacked(packed2)) {
+        try (DataInputStream is = openPackedBatch(packed2)) {
             assertEquals(2, is.readInt());
             readAndCheckLoggingBreakpointEvent(0, 77, "first log", is);
             readAndCheckLoggingBreakpointEvent(1, 88, "second log", is);
@@ -181,12 +184,143 @@ public class LogCaptureEncodingTest {
         }
     }
 
-    static DataInputStream openPacked(String packed) throws IOException {
-        return new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(packed.getBytes(StandardCharsets.ISO_8859_1))));
+    @Test
+    public void exceededRawEventLimitPacksEventsWithoutCallingOutputWrittenBelowPackedMemoryLimit() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1"); // 1 is ok, 2 is a signal to pack
+        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, LARGE_PACKED_BYTE_LIMIT);
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "first stdout\n");
+        capture(FileDescriptor.err, "second stdout\n");
+
+        assertEquals("packed data stays in memory below the packed-byte limit", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
+        assertEquals("raw events are drained after packing", 0, LogCaptureStorage.EVENTS.size());
+        assertEquals(1, LogCaptureStorage.PACKED_BATCHES.size());
+        assertTrue(LogCaptureStorage.PACKED_BATCHES_BYTES.get() > 0);
+        assertEquals("not sent to debugger yet", -1, LogCaptureStorage.LAST_FLUSHED_EVENT_ID.get());
+
+        String packed = LogCaptureStorage.packBatchedData();
+        assertNotNull(packed);
+        try (DataInputStream is = openPackedBatch(packed)) {
+            assertEquals(2, is.readInt());
+            readAndCheckStdoutEvent(0, false, "first stdout\n", is);
+            readAndCheckStdoutEvent(1, true, "second stdout\n", is);
+        }
+
+        assertEquals("packBatchedData does not drain packed batches", 1, LogCaptureStorage.PACKED_BATCHES.size());
+        assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
+    }
+
+    @Test
+    public void packBatchedDataPacksPendingRawEventsBeforeReturning() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1"); // 1 is ok, 2 is a signal to pack
+        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, LARGE_PACKED_BYTE_LIMIT);
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "first stdout\n");
+        capture(FileDescriptor.err, "second stdout\n");
+        assertEquals(1, LogCaptureStorage.PACKED_BATCHES.size());
+        assertEquals(0, LogCaptureStorage.EVENTS.size());
+
+        capture(FileDescriptor.out, "third stdout\n");
+        assertEquals(1, LogCaptureStorage.PACKED_BATCHES.size());
+        assertEquals(1, LogCaptureStorage.EVENTS.size());
+
+        String packed = LogCaptureStorage.packBatchedData();
+        assertNotNull(packed);
+        try (DataInputStream batches = openPackedBatches(packed)) {
+            assertEquals(2, batches.readInt());
+            try (DataInputStream is = openNextPackedBatch(batches);
+                 DataInputStream secondBatch = openNextPackedBatch(batches)) {
+                assertEquals(2, is.readInt());
+                readAndCheckStdoutEvent(0, false, "first stdout\n", is);
+                readAndCheckStdoutEvent(1, true, "second stdout\n", is);
+
+                assertEquals(1, secondBatch.readInt());
+                readAndCheckStdoutEvent(2, false, "third stdout\n", secondBatch);
+            }
+        }
+
+        assertEquals(0, LogCaptureStorage.EVENTS.size());
+        assertEquals(2, LogCaptureStorage.PACKED_BATCHES.size());
+    }
+
+    @Test
+    public void packedBatchOverflowFlushesPendingRawEventsToo() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1"); // 1 is ok, 2 is a signal to pack
+        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, LARGE_PACKED_BYTE_LIMIT);
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "first stdout\n");
+        capture(FileDescriptor.err, "second stdout\n");
+        assertEquals(1, LogCaptureStorage.PACKED_BATCHES.size());
+        assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
+
+        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, "1");
+        LogCaptureStorage.init(properties, true);
+        capture(FileDescriptor.out, "third stdout\n");
+
+        assertEquals(1, LogCaptureStorage.outputWrittenDumpForTests.size());
+        assertEquals(0, LogCaptureStorage.EVENTS.size());
+        assertEquals(0, LogCaptureStorage.PACKED_BATCHES.size());
+        try (DataInputStream batches = openDumpBatches(0)) {
+            assertEquals(2, batches.readInt());
+            try (DataInputStream is = openNextPackedBatch(batches);
+                 DataInputStream secondBatch = openNextPackedBatch(batches)) {
+                assertEquals(2, is.readInt());
+                readAndCheckStdoutEvent(0, false, "first stdout\n", is);
+                readAndCheckStdoutEvent(1, true, "second stdout\n", is);
+
+                assertEquals(1, secondBatch.readInt());
+                readAndCheckStdoutEvent(2, false, "third stdout\n", secondBatch);
+            }
+        }
+    }
+
+    @Test
+    public void packBatchedDataDeclaresNumberOfPackedBatches() throws Exception {
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "first batch\n");
+        assertNotNull(LogCaptureStorage.packBatchedData());
+        capture(FileDescriptor.err, "second batch\n");
+
+        String packed = LogCaptureStorage.packBatchedData();
+        assertNotNull(packed);
+        try (DataInputStream batches = openPackedBatches(packed)) {
+            assertEquals(2, batches.readInt());
+            try (DataInputStream firstBatch = openNextPackedBatch(batches);
+                 DataInputStream secondBatch = openNextPackedBatch(batches)) {
+                assertEquals(1, firstBatch.readInt());
+                readAndCheckStdoutEvent(0, false, "first batch\n", firstBatch);
+
+                assertEquals(1, secondBatch.readInt());
+                readAndCheckStdoutEvent(1, true, "second batch\n", secondBatch);
+            }
+        }
+    }
+
+    static DataInputStream openPackedBatch(String packed) throws IOException {
+        try (DataInputStream batches = openPackedBatches(packed)) {
+            assertEquals(1, batches.readInt());
+            return openNextPackedBatch(batches);
+        }
+    }
+
+    static DataInputStream openPackedBatches(String packed) {
+        return new DataInputStream(new ByteArrayInputStream(packed.getBytes(StandardCharsets.ISO_8859_1)));
+    }
+
+    static DataInputStream openNextPackedBatch(DataInputStream batches) throws IOException {
+        return new DataInputStream(new GZIPInputStream(new ByteArrayInputStream(readBytesWithSize(batches))));
     }
 
     static DataInputStream openDump(int index) throws IOException {
-        return openPacked(LogCaptureStorage.outputWrittenDumpForTests.get(index));
+        return openPackedBatch(LogCaptureStorage.outputWrittenDumpForTests.get(index));
+    }
+
+    static DataInputStream openDumpBatches(int index) {
+        return openPackedBatches(LogCaptureStorage.outputWrittenDumpForTests.get(index));
     }
 
     static List<StackTraceElement> readAndCheckStdoutEvent(int expectedId,
@@ -260,8 +394,11 @@ public class LogCaptureEncodingTest {
     static void resetLogCaptureStorage() {
         LogCaptureStorage.EVENT_COUNTER.set(0);
         LogCaptureStorage.LAST_FLUSHED_EVENT_ID.set(-1);
+        LogCaptureStorage.LAST_PACKED_EVENT_ID.set(-1);
         LogCaptureStorage.LAST_LOGGING_BREAKPOINT_EVENT_ID.set(-1);
         LogCaptureStorage.EVENTS.clear();
+        LogCaptureStorage.PACKED_BATCHES.clear();
+        LogCaptureStorage.PACKED_BATCHES_BYTES.set(0);
         LogCaptureStorage.outputWrittenDumpForTests = null;
     }
 }

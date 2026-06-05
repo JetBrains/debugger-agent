@@ -26,22 +26,27 @@ public class LogCaptureStorage {
     static final String BATCHING_ENABLED_PROPERTY = "logCaptureBatchingEnabled";
     static final String BATCHING_FLUSH_PERIOD_PROPERTY = "logCaptureBatchingFlushPeriod";
     static final String BATCHING_MAX_EVENTS_PROPERTY = "logCaptureBatchingMaxEvents";
+    static final String BATCHING_MAX_PACKED_BYTES_PROPERTY = "logCaptureBatchingMaxPackedBytes";
+    private static final long DEFAULT_MAX_BATCHED_PACKED_BYTES = 5L * 1024L * 1024L;
 
     private static boolean BATCHING_ENABLED;
     private static int MAX_BATCHED_EVENTS_COUNT;
+    private static long MAX_BATCHED_PACKED_BYTES;
     private static boolean STDOUT_CAPTURE_ENABLED;
 
     // It's used by the debugger.
     static final AtomicLong EVENT_COUNTER = new AtomicLong();
 
-    // It contains events that are waiting to be flushed.
+    // It contains raw events that are waiting to be packed.
     // New ones could be added concurrently.
-    // They can also be flushed concurrently, leading to sending the same events multiple times.
-    // It's ok and is handed by the debugger using IDs.
-    // Event is removed from the queue only after it's guaranteed to be received by the debugger.
+    // Raw or packed data can be flushed concurrently, leading to sending the same events multiple times.
+    // It's ok and is handled by the debugger using IDs.
     static final ConcurrentLinkedQueue<Event> EVENTS = new ConcurrentLinkedQueue<>();
+    static final ConcurrentLinkedQueue<PackedBatch> PACKED_BATCHES = new ConcurrentLinkedQueue<>();
+    static final AtomicLong PACKED_BATCHES_BYTES = new AtomicLong();
 
     static final AtomicLong LAST_FLUSHED_EVENT_ID = new AtomicLong(-1);
+    static final AtomicLong LAST_PACKED_EVENT_ID = new AtomicLong(-1);
     static final AtomicLong LAST_LOGGING_BREAKPOINT_EVENT_ID = new AtomicLong(-1);
 
     static class Event {
@@ -59,6 +64,16 @@ public class LogCaptureStorage {
         }
     }
 
+    static class PackedBatch {
+        public final byte[] data;
+        public final long lastEventId;
+
+        public PackedBatch(byte[] data, long lastEventId) {
+            this.data = data;
+            this.lastEventId = lastEventId;
+        }
+    }
+
     private static final FileDescriptor FD_OUT = FileDescriptor.out;
     private static final FileDescriptor FD_ERR = FileDescriptor.err;
 
@@ -73,6 +88,9 @@ public class LogCaptureStorage {
         STDOUT_CAPTURE_ENABLED = logCaptureEnabled;
         BATCHING_ENABLED = Boolean.parseBoolean(properties.getProperty(BATCHING_ENABLED_PROPERTY, "true"));
         MAX_BATCHED_EVENTS_COUNT = Integer.parseInt(properties.getProperty(BATCHING_MAX_EVENTS_PROPERTY, "100"));
+        MAX_BATCHED_PACKED_BYTES = Long.parseLong(properties.getProperty(
+                BATCHING_MAX_PACKED_BYTES_PROPERTY,
+                String.valueOf(DEFAULT_MAX_BATCHED_PACKED_BYTES)));
         if (BATCHING_ENABLED && !batchingSchedulerStarted) {
             batchingSchedulerStarted = true;
 
@@ -174,42 +192,72 @@ public class LogCaptureStorage {
         e.printStackTrace(System.err);
     }
 
-    private static void flushBatchedData() throws IOException {
-        flushBatchedDataIfMoreThan(0);
-    }
-
     /**
      * It's used by the debugger via evaluation.
-     * This method intentionally does not clear the collected data because the return value may be collected
+     * This method intentionally does not drop the collected data because the return value may be collected
      * before it appears on the debugger side. The clearing happens in the periodic flush cycle.
      */
     static String packBatchedData() throws IOException {
-        ArrayList<Event> eventsSnapshot = new ArrayList<>(EVENTS);
-        if (eventsSnapshot.isEmpty()) return null;
-        return pack(eventsSnapshot);
+        packRawEventsIfMoreThan(0);
+        List<PackedBatch> packedBatchesSnapshot = new ArrayList<>(PACKED_BATCHES);
+        if (packedBatchesSnapshot.isEmpty()) return null;
+        return packPendingData(packedBatchesSnapshot);
     }
 
     private static void flushBatchedDataIfMoreThan(int eventsCountLimit) throws IOException {
-        if (eventsCountLimit > 0) {
-            // This is an approximation, but eventsCountLimit is considered non-strict when it is not 0.
-            // The exact size is checked below.
-            // N.B. EVENTS.size() takes linear time, so it can be very slow.
-            long currentSize = EVENT_COUNTER.get() - 1 - LAST_FLUSHED_EVENT_ID.get();
-            if (currentSize <= eventsCountLimit) return;
+        if (eventsCountLimit <= 0 || currentEventsSize() > eventsCountLimit) {
+            packRawEventsIfMoreThan(eventsCountLimit);
         }
-        ArrayList<Event> eventsSnapshot = new ArrayList<>(EVENTS);
-        if (eventsSnapshot.size() <= eventsCountLimit) return;
-        packAndSend(eventsSnapshot);
-        EVENTS.removeAll(new HashSet<>(eventsSnapshot));
-        long lastFlushedId = findMaxId(eventsSnapshot);
-        setIfGreater(LAST_FLUSHED_EVENT_ID, lastFlushedId);
+
+        flushPackedBatchesIfNeeded(false);
+    }
+
+    private static long currentEventsSize() {
+        // This is an approximation, but eventsCountLimit is considered non-strict when it is not 0.
+        // The exact size is checked below.
+        // N.B. EVENTS.size() takes linear time, so it can be very slow.
+        return EVENT_COUNTER.get() - 1 - LAST_PACKED_EVENT_ID.get();
+    }
+
+    private static void flushBatchedData() throws IOException {
+        packRawEventsIfMoreThan(0);
+        flushPackedBatchesIfNeeded(true);
+    }
+
+    private static void packRawEventsIfMoreThan(int eventsCountLimit) throws IOException {
+        if (EVENTS.isEmpty()) return;
+        List<Event> eventsSnapshot = new ArrayList<>(EVENTS);
+        if (eventsSnapshot.size() > eventsCountLimit) {
+            enqueuePackedBatch(eventsSnapshot);
+            EVENTS.removeAll(new HashSet<>(eventsSnapshot));
+        }
+    }
+
+    private static void enqueuePackedBatch(List<Event> events) throws IOException {
+        if (events.isEmpty()) return;
+        byte[] packed = packBytes(events);
+        long lastPackedId = findMaxId(events);
+        PACKED_BATCHES.add(new PackedBatch(packed, lastPackedId));
+        PACKED_BATCHES_BYTES.addAndGet(packed.length);
+        setIfGreater(LAST_PACKED_EVENT_ID, lastPackedId);
+    }
+
+    private static void flushPackedBatchesIfNeeded(boolean forceOutput) throws IOException {
+        if (!forceOutput && PACKED_BATCHES_BYTES.get() <= MAX_BATCHED_PACKED_BYTES) return;
+        packRawEventsIfMoreThan(0);
+        List<PackedBatch> packedBatchesSnapshot = new ArrayList<>(PACKED_BATCHES);
+        if (packedBatchesSnapshot.isEmpty()) return;
+
+        outputWritten(packPendingData(packedBatchesSnapshot));
+        removePackedBatches(packedBatchesSnapshot);
+        setIfGreater(LAST_FLUSHED_EVENT_ID, findMaxPackedEventId(packedBatchesSnapshot));
     }
 
     private static void packAndSend(Collection<Event> events) throws IOException {
-        outputWritten(pack(events));
+        outputWritten(packPendingData(Collections.singletonList(new PackedBatch(packBytes(events), -1))));
     }
 
-    private static String pack(Collection<Event> events) throws IOException {
+    private static byte[] packBytes(Collection<Event> events) throws IOException {
         assert !events.isEmpty();
 
         ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
@@ -225,6 +273,18 @@ public class LogCaptureStorage {
             }
         }
         // ensure to close the gzip stream before extracting compressed data.
+        return bas.toByteArray();
+    }
+
+    private static String packPendingData(Collection<PackedBatch> packedBatches) throws IOException {
+        ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
+        try (DataOutputStream dos = new DataOutputStream(bas)) {
+            dos.writeInt(packedBatches.size());
+            for (PackedBatch batch : packedBatches) {
+                dos.writeInt(batch.data.length);
+                dos.write(batch.data);
+            }
+        }
         return bas.toString(StandardCharsets.ISO_8859_1.name());
     }
 
@@ -258,7 +318,7 @@ public class LogCaptureStorage {
         }
     }
 
-    private static long findMaxId(ArrayList<Event> events) {
+    private static long findMaxId(List<Event> events) {
         long lastFlushedId = -1;
         for (int i = events.size() - 1; i >= 0; i--) {
             long id = events.get(i).id;
@@ -267,6 +327,28 @@ public class LogCaptureStorage {
             }
         }
         return lastFlushedId;
+    }
+
+    private static long findMaxPackedEventId(Collection<PackedBatch> packedBatches) {
+        long result = -1;
+        for (PackedBatch batch : packedBatches) {
+            if (batch.lastEventId > result) {
+                result = batch.lastEventId;
+            }
+        }
+        return result;
+    }
+
+    private static void removePackedBatches(Collection<PackedBatch> packedBatches) {
+        long removedBytes = 0;
+        for (PackedBatch batch : packedBatches) {
+            if (PACKED_BATCHES.remove(batch)) {
+                removedBytes += batch.data.length;
+            }
+        }
+        if (removedBytes > 0) {
+            PACKED_BATCHES_BYTES.addAndGet(-removedBytes);
+        }
     }
 
     private static void setIfGreater(AtomicLong maxValue, long newValue) {
