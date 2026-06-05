@@ -5,23 +5,25 @@ import java.io.DataOutputStream;
 import java.io.FileDescriptor;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Properties;
 
 //Throwable capacity before getStackTrace()
-//Bytes per Throwable: 2809
-//Throwables fitting 5 MiB: 1866
+//Bytes per Throwable: 2807
+//Throwables fitting 5 MiB: 1867
 //
 //Throwable capacity after getStackTrace()
-//Bytes per Throwable: 8225
-//Throwables fitting 5 MiB: 637
+//Bytes per Throwable: 8231
+//Throwables fitting 5 MiB: 636
 //
 //Captured stack bytes capacity
 //Bytes per stack: 9142
 //Stacks fitting 5 MiB: 573
 //
 //Packed batch capacity
-//Packed bytes per event: 65
-//Events fitting 5 MiB: 80896
+//Packed bytes per event: 35
+//Events fitting 5 MiB: 150500
 public class ThrowableCapacityOverhead {
     private static final long BYTES_LIMIT = 5L * 1024L * 1024L;
     private static final int MAX_STACK_DEPTH = 100;
@@ -77,7 +79,10 @@ public class ThrowableCapacityOverhead {
     private static byte[] writeCapturedStack() throws IOException {
         ByteArrayOutputStream bas = new ByteArrayOutputStream();
         try (DataOutputStream dos = new DataOutputStream(bas)) {
-            CaptureStorage.writeCapturedStackToStream(new Throwable(), CaptureStorage.getCurrentCapturedStack(), MAX_STACK_DEPTH, dos);
+            CaptureStorage.CapturedStack capturedStack = CaptureStorage.getCurrentCapturedStack();
+            List<StackTraceElement> regularStack = Arrays.asList(new Throwable().getStackTrace());
+            CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
+            CaptureStorage.writeAsyncStackTraceToStream(CaptureStorage.getCapturedStackTrace(capturedStack, MAX_STACK_DEPTH - regularStack.size()), dos);
         }
         return bas.toByteArray();
     }
@@ -138,7 +143,6 @@ public class ThrowableCapacityOverhead {
         Properties properties = new Properties();
         properties.put(LogCaptureStorage.BATCHING_ENABLED_PROPERTY, "true");
         properties.put(LogCaptureStorage.BATCHING_FLUSH_PERIOD_PROPERTY, "999999999");
-        properties.put(LogCaptureStorage.BATCHING_MAX_EVENTS_PROPERTY, "1000");
         properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, String.valueOf(Long.MAX_VALUE));
         LogCaptureStorage.init(properties, true);
 
@@ -155,12 +159,13 @@ public class ThrowableCapacityOverhead {
     private static void resetLogCaptureStorage() {
         LogCaptureStorage.EVENT_COUNTER.set(0);
         LogCaptureStorage.LAST_FLUSHED_EVENT_ID.set(-1);
-        LogCaptureStorage.LAST_PACKED_EVENT_ID.set(-1);
         LogCaptureStorage.LAST_LOGGING_BREAKPOINT_EVENT_ID.set(-1);
         LogCaptureStorage.EVENTS.clear();
+        LogCaptureStorage.EVENTS_PAYLOAD_BYTES.set(0);
         LogCaptureStorage.PACKED_BATCHES.clear();
         LogCaptureStorage.PACKED_BATCHES_BYTES.set(0);
         LogCaptureStorage.outputWrittenDumpForTests = null;
+        ThrowableInterner.clear();
     }
 
     public static void main(String[] args) throws Exception {
