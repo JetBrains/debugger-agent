@@ -497,13 +497,12 @@ public final class CaptureStorage {
     }
   }
 
-  static void writeCapturedStackToStream(Throwable throwable, CapturedStack capturedStack, int limit, DataOutputStream dos) throws IOException {
-    List<StackTraceElement> regularStack = trimInitAgentFrames(Arrays.asList(throwable.getStackTrace()));
-    writeAsyncStackTraceToStream(regularStack, dos);
-    if (capturedStack != null) {
-      writeAsyncStackTraceElementToStream(ASYNC_STACK_ELEMENT, dos);
-      writeAsyncStackTraceToStream(getStackTrace(capturedStack, limit - regularStack.size()), dos);
-    }
+  static List<StackTraceElement> getThrowableStackTrace(Throwable throwable) {
+    return trimInitAgentFrames(Arrays.asList(throwable.getStackTrace()));
+  }
+
+  static List<StackTraceElement> getCapturedStackTrace(CapturedStack capturedStack, int limit) {
+    return getStackTrace(capturedStack, limit);
   }
 
   // to be run from the debugger
