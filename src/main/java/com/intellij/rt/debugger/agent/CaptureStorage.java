@@ -69,6 +69,10 @@ public final class CaptureStorage {
     }
   }
 
+  static CapturedStack getCurrentCapturedStack() {
+    return getStacksForCurrentThread().peekLast();
+  }
+
   @SuppressWarnings("StaticNonFinalField")
   public static boolean DEBUG; // set from debugger
   private static boolean ENABLED = true; // set from debugger
@@ -406,7 +410,7 @@ public final class CaptureStorage {
     }
   }
 
-  private static abstract class CapturedStack {
+  static abstract class CapturedStack {
     abstract List<StackTraceElement> getStackTrace();
 
     int getRecursionDepth() {
@@ -488,13 +492,13 @@ public final class CaptureStorage {
     }
   }
 
-  /**
-   * Returns the captured stack trace of the current thread.
-   */
-  static List<StackTraceElement> getCurrentCapturedStack(int limit) {
-    CapturedStack stack = getStacksForCurrentThread().peekLast();
-    if (stack == null) return null;
-    return getStackTrace(stack, limit);
+  static void writeCapturedStackToStream(Throwable throwable, CapturedStack capturedStack, int limit, DataOutputStream dos) throws IOException {
+    List<StackTraceElement> regularStack = trimInitAgentFrames(Arrays.asList(throwable.getStackTrace()));
+    writeAsyncStackTraceToStream(regularStack, dos);
+    if (capturedStack != null) {
+      writeAsyncStackTraceElementToStream(ASYNC_STACK_ELEMENT, dos);
+      writeAsyncStackTraceToStream(getStackTrace(capturedStack, limit - regularStack.size()), dos);
+    }
   }
 
   // to be run from the debugger

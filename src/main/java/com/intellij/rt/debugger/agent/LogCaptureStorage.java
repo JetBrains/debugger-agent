@@ -56,11 +56,15 @@ public class LogCaptureStorage {
         public final long id;
         public final byte type;
         public final byte[] payload;
+        public final Throwable throwable;
+        public final CaptureStorage.CapturedStack stack;
 
-        public Event(long id, byte type, byte[] payload) {
+        public Event(long id, byte type, byte[] payload, Throwable throwable, CaptureStorage.CapturedStack stack) {
             this.id = id;
             this.type = type;
             this.payload = payload;
+            this.throwable = throwable;
+            this.stack = stack;
         }
     }
 
@@ -87,7 +91,7 @@ public class LogCaptureStorage {
         ENABLED = true;
         STDOUT_CAPTURE_ENABLED = logCaptureEnabled;
         BATCHING_ENABLED = Boolean.parseBoolean(properties.getProperty(BATCHING_ENABLED_PROPERTY, "true"));
-        MAX_BATCHED_EVENTS_COUNT = Integer.parseInt(properties.getProperty(BATCHING_MAX_EVENTS_PROPERTY, "100"));
+        MAX_BATCHED_EVENTS_COUNT = Integer.parseInt(properties.getProperty(BATCHING_MAX_EVENTS_PROPERTY, "1000"));
         MAX_BATCHED_PACKED_BYTES = Long.parseLong(properties.getProperty(
                 BATCHING_MAX_PACKED_BYTES_PROPERTY,
                 String.valueOf(DEFAULT_MAX_BATCHED_PACKED_BYTES)));
@@ -152,10 +156,9 @@ public class LogCaptureStorage {
                 dos.writeInt(len);
                 dos.write(bytes, off, len);
                 dos.writeBoolean(isErr);
-                writeCurrentStacks(dos);
             }
             byte[] payload = bas.toByteArray();
-            captureEvent(new Event(id, Event.STD_OUTPUT_TYPE, payload));
+            captureEvent(new Event(id, Event.STD_OUTPUT_TYPE, payload, new Throwable(), CaptureStorage.getCurrentCapturedStack()));
         } catch (Throwable e) {
             handleException(e);
         } finally {
@@ -173,16 +176,6 @@ public class LogCaptureStorage {
             flushBatchedDataIfMoreThan(MAX_BATCHED_EVENTS_COUNT);
         } else {
             packAndSend(Collections.singletonList(event));
-        }
-    }
-
-    private static void writeCurrentStacks(DataOutputStream dos) throws IOException {
-        List<StackTraceElement> regularStack = CaptureStorage.getCurrentStackTraceWithoutAgentFrames();
-        List<StackTraceElement> capturedStack = CaptureStorage.getCurrentCapturedStack(MAX_STACK_DEPTH - regularStack.size());
-        CaptureStorage.writeAsyncStackTraceToStream(regularStack, dos);
-        if (capturedStack != null) {
-            CaptureStorage.writeAsyncStackTraceElementToStream(CaptureStorage.ASYNC_STACK_ELEMENT, dos);
-            CaptureStorage.writeAsyncStackTraceToStream(capturedStack, dos);
         }
     }
 
@@ -267,12 +260,21 @@ public class LogCaptureStorage {
             for (Event event : events) {
                 dos.writeLong(event.id);
                 dos.writeByte(event.type);
-                byte[] bytes = event.payload;
+                byte[] bytes = packEventPayload(event);
                 dos.writeInt(bytes.length);
                 dos.write(bytes);
             }
         }
         // ensure to close the gzip stream before extracting compressed data.
+        return bas.toByteArray();
+    }
+
+    private static byte[] packEventPayload(Event event) throws IOException {
+        ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
+        try (DataOutputStream dos = new DataOutputStream(bas)) {
+            dos.write(event.payload);
+            CaptureStorage.writeCapturedStackToStream(event.throwable, event.stack, MAX_STACK_DEPTH, dos);
+        }
         return bas.toByteArray();
     }
 
@@ -307,10 +309,9 @@ public class LogCaptureStorage {
                 dos.writeInt(instrumentationId);
                 dos.writeInt(messageBytes.length);
                 dos.write(messageBytes);
-                writeCurrentStacks(dos);
             }
             byte[] payload = bas.toByteArray();
-            captureEvent(new Event(id, Event.LOGGING_BREAKPOINT_TYPE, payload));
+            captureEvent(new Event(id, Event.LOGGING_BREAKPOINT_TYPE, payload, new Throwable(), CaptureStorage.getCurrentCapturedStack()));
         } catch (Throwable e) {
             handleException(e);
         } finally {
