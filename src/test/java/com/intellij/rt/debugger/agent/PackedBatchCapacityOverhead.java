@@ -4,11 +4,11 @@ import java.io.FileDescriptor;
 import java.nio.charset.StandardCharsets;
 import java.util.Properties;
 
-//Packed batches: 30
-//Packed bytes: 2005984
-//Packed bytes per batch: 66866
-//Packed batches fitting 5 MiB storage limit: 78
-//Capture + pack time: 73569 ns
+//Packed batches: 59
+//Packed bytes: 1987391
+//Packed bytes per batch: 33685
+//Packed batches fitting 5 MiB storage limit: 155
+//Capture + pack time: 54638 ns
 public class PackedBatchCapacityOverhead {
     private static final long PACKED_BYTES_LIMIT = 5L * 1024L * 1024L;
 

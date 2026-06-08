@@ -18,7 +18,7 @@ import java.util.zip.GZIPInputStream;
 import static org.junit.Assert.*;
 
 public class LogCaptureEncodingTest {
-    private static final String LARGE_PACKED_BYTE_LIMIT = String.valueOf(5 * 1024 * 1024);
+    private static final String LARGE_BUFFER_SIZE = String.valueOf(5 * 1024 * 1024);
     private static final ThreadLocal<List<List<StackTraceElement>>> STACK_DICTIONARY = new ThreadLocal<>();
 
     private final Properties properties = new Properties();
@@ -32,7 +32,7 @@ public class LogCaptureEncodingTest {
         resetLogCaptureStorage();
         properties.put(LogCaptureStorage.BATCHING_ENABLED_PROPERTY, "true");
         properties.put(LogCaptureStorage.BATCHING_FLUSH_PERIOD_PROPERTY, "999999999"); // never
-        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, LARGE_PACKED_BYTE_LIMIT);
+        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, LARGE_BUFFER_SIZE);
         LogCaptureStorage.outputWrittenDumpForTests = new ArrayList<>();
 
     }
@@ -48,7 +48,7 @@ public class LogCaptureEncodingTest {
         assertEquals("no flush yet", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
 
         capture(FileDescriptor.err, "bbb\n");
-        assertEquals("packed data stays in memory below the packed-byte limit", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
+        assertEquals("buffered data stays in memory below the buffer threshold", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
         assertEquals(0, LogCaptureStorage.PACKED_BATCHES.size());
 
         try (DataInputStream is = openPackedBatch(LogCaptureStorage.packBatchedData())) {
@@ -183,14 +183,14 @@ public class LogCaptureEncodingTest {
     }
 
     @Test
-    public void rawEventsStayQueuedBelowPackedMemoryLimit() throws Exception {
-        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, LARGE_PACKED_BYTE_LIMIT);
+    public void rawEventsStayQueuedBelowBufferThreshold() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, LARGE_BUFFER_SIZE);
         LogCaptureStorage.init(properties, true);
 
         capture(FileDescriptor.out, "first stdout\n");
         capture(FileDescriptor.err, "second stdout\n");
 
-        assertEquals("packed data stays in memory below the packed-byte limit", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
+        assertEquals("buffered data stays in memory below the buffer threshold", 0, LogCaptureStorage.outputWrittenDumpForTests.size());
         assertEquals(2, LogCaptureStorage.EVENTS.size());
         assertEquals(0, LogCaptureStorage.PACKED_BATCHES.size());
         assertEquals(0, LogCaptureStorage.PACKED_BATCHES_BYTES.get());
@@ -209,8 +209,8 @@ public class LogCaptureEncodingTest {
     }
 
     @Test
-    public void exceededRawEventBytesLimitPacksEvents() throws Exception {
-        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, "1");
+    public void exceededRawEventBufferThresholdPacksEvents() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, "1");
         LogCaptureStorage.init(properties, true);
 
         capture(FileDescriptor.out, "a\n");
@@ -218,12 +218,23 @@ public class LogCaptureEncodingTest {
         assertEquals("raw event bytes are drained after exceeding the estimated byte limit", 0, LogCaptureStorage.EVENTS.size());
         assertEquals(0, LogCaptureStorage.EVENTS_PAYLOAD_BYTES.get());
         assertEquals(0, LogCaptureStorage.PACKED_BATCHES.size());
-        assertEquals("packed bytes use the same limit and are sent immediately", 1, LogCaptureStorage.outputWrittenDumpForTests.size());
+        assertEquals("packed batches use the same buffer threshold and are sent immediately", 1, LogCaptureStorage.outputWrittenDumpForTests.size());
+    }
+
+    @Test
+    public void rawEventsUseHalfOfBufferSizeAsThreshold() throws Exception {
+        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, String.valueOf(2 * 3000));
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "a\n");
+
+        assertEquals("raw event bytes are packed after exceeding half the buffer size", 0, LogCaptureStorage.EVENTS.size());
+        assertEquals(0, LogCaptureStorage.EVENTS_PAYLOAD_BYTES.get());
     }
 
     @Test
     public void packBatchedDataPacksPendingRawEventsBeforeReturning() throws Exception {
-        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, LARGE_PACKED_BYTE_LIMIT);
+        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, LARGE_BUFFER_SIZE);
         LogCaptureStorage.init(properties, true);
 
         capture(FileDescriptor.out, "first stdout\n");
@@ -276,7 +287,7 @@ public class LogCaptureEncodingTest {
 
     @Test
     public void packedBatchOverflowFlushesPendingRawEventsToo() throws Exception {
-        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, LARGE_PACKED_BYTE_LIMIT);
+        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, LARGE_BUFFER_SIZE);
         LogCaptureStorage.init(properties, true);
 
         capture(FileDescriptor.out, "first stdout\n");
@@ -284,7 +295,7 @@ public class LogCaptureEncodingTest {
         assertEquals(0, LogCaptureStorage.PACKED_BATCHES.size());
         assertEquals(0, LogCaptureStorage.outputWrittenDumpForTests.size());
 
-        properties.put(LogCaptureStorage.BATCHING_MAX_PACKED_BYTES_PROPERTY, "1");
+        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, "1");
         LogCaptureStorage.init(properties, true);
         capture(FileDescriptor.out, "third stdout\n");
 

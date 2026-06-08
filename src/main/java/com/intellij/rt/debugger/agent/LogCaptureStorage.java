@@ -26,12 +26,12 @@ public class LogCaptureStorage {
 
     static final String BATCHING_ENABLED_PROPERTY = "logCaptureBatchingEnabled";
     static final String BATCHING_FLUSH_PERIOD_PROPERTY = "logCaptureBatchingFlushPeriod";
-    static final String BATCHING_MAX_PACKED_BYTES_PROPERTY = "logCaptureBatchingMaxPackedBytes";
-    private static final long DEFAULT_MAX_BATCHED_PACKED_BYTES = 5L * 1024L * 1024L;
+    static final String BATCHING_BUFFER_SIZE_PROPERTY = "logCaptureBatchingBufferSize";
+    private static final long DEFAULT_BUFFER_SIZE = calculateDefaultBufferSize();
     private static final int ESTIMATED_THROWABLE_BYTES = 3000;
 
     private static boolean BATCHING_ENABLED;
-    private static long MAX_BATCHED_PACKED_BYTES;
+    private static long BUFFER_SIZE;
     private static boolean STDOUT_CAPTURE_ENABLED;
 
     // It's used by the debugger.
@@ -120,9 +120,8 @@ public class LogCaptureStorage {
         ENABLED = true;
         STDOUT_CAPTURE_ENABLED = logCaptureEnabled;
         BATCHING_ENABLED = Boolean.parseBoolean(properties.getProperty(BATCHING_ENABLED_PROPERTY, "true"));
-        MAX_BATCHED_PACKED_BYTES = Long.parseLong(properties.getProperty(
-                BATCHING_MAX_PACKED_BYTES_PROPERTY,
-                String.valueOf(DEFAULT_MAX_BATCHED_PACKED_BYTES)));
+        // Split in 2 halves for raw events and compressed batches.
+        BUFFER_SIZE = getBufferSize(properties) / 2;
         if (BATCHING_ENABLED && !batchingSchedulerStarted) {
             batchingSchedulerStarted = true;
 
@@ -131,7 +130,7 @@ public class LogCaptureStorage {
                 public void run() {
                     CAPTURING.set(true);
                     try {
-                        flushBatchedData();
+                        flushBatchedData(true);
                     } catch (Throwable e) {
                         handleException(e);
                     } finally {
@@ -149,6 +148,18 @@ public class LogCaptureStorage {
                     new Thread(flushAction, "IntelliJ Debugger Shutdown Log Flush Thread"));
         }
         return true;
+    }
+
+    static long calculateDefaultBufferSize() {
+        long defaultMax = 5L * 1024L * 1024L; // 5 MB
+        long runtimeMax = Runtime.getRuntime().maxMemory() / 100; // 1% of max heap
+        return Math.min(defaultMax, runtimeMax);
+    }
+
+    static long getBufferSize(Properties properties) {
+        return Long.parseLong(properties.getProperty(
+                BATCHING_BUFFER_SIZE_PROPERTY,
+                String.valueOf(DEFAULT_BUFFER_SIZE)));
     }
 
     private static long createNextEventId(int eventType) {
@@ -173,7 +184,7 @@ public class LogCaptureStorage {
 
             // Avoid logging breakpoint's output reorder with stdout.
             if (hasBatchedLoggingBreakpointEvents()) {
-                flushBatchedData();
+                flushBatchedData(true);
             }
             if (!STDOUT_CAPTURE_ENABLED) return;
 
@@ -202,7 +213,7 @@ public class LogCaptureStorage {
         if (BATCHING_ENABLED) {
             EVENTS.add(event);
             EVENTS_PAYLOAD_BYTES.addAndGet(event.memoryFootprintEstimate());
-            flushBatchedDataIfNeeded();
+            flushBatchedData(false);
         } else {
             PackedBatch batch = new PackedBatch(packBytes(Collections.singletonList(event)), -1);
             ThrowableInterner.clear();
@@ -229,14 +240,6 @@ public class LogCaptureStorage {
         return packBatches(packedBatchesSnapshot);
     }
 
-    private static void flushBatchedDataIfNeeded() throws IOException {
-        if (currentEventsEstimatedBytes() > MAX_BATCHED_PACKED_BYTES) {
-            packRawEvents();
-        }
-
-        flushPackedBatchesIfNeeded(false);
-    }
-
     private static long currentEventsEstimatedBytes() {
         long throwablesCount = ThrowableInterner.size();
         if (throwablesCount == 0) {
@@ -245,11 +248,6 @@ public class LogCaptureStorage {
             throwablesCount = EVENT_COUNTER.get() - 1 - LAST_PACKED_EVENT_ID.get();
         }
         return EVENTS_PAYLOAD_BYTES.get() + ESTIMATED_THROWABLE_BYTES * throwablesCount;
-    }
-
-    private static void flushBatchedData() throws IOException {
-        packRawEvents();
-        flushPackedBatchesIfNeeded(true);
     }
 
     private static void packRawEvents() throws IOException {
@@ -272,9 +270,11 @@ public class LogCaptureStorage {
         setIfGreater(LAST_PACKED_EVENT_ID, lastPackedId);
     }
 
-    private static void flushPackedBatchesIfNeeded(boolean forceOutput) throws IOException {
-        if (!forceOutput && PACKED_BATCHES_BYTES.get() <= MAX_BATCHED_PACKED_BYTES) return;
-        packRawEvents();
+    private static void flushBatchedData(boolean forceOutput) throws IOException {
+        if (forceOutput || currentEventsEstimatedBytes() > BUFFER_SIZE) {
+            packRawEvents();
+        }
+        if (!forceOutput && PACKED_BATCHES_BYTES.get() <= BUFFER_SIZE) return;
         List<PackedBatch> packedBatchesSnapshot = new ArrayList<>(PACKED_BATCHES);
         if (packedBatchesSnapshot.isEmpty()) return;
 
