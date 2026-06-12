@@ -9,6 +9,15 @@ import org.jetbrains.capture.org.objectweb.asm.Opcodes;
 import java.lang.instrument.ClassFileTransformer;
 import java.security.ProtectionDomain;
 
+/**
+ * Achieves two extra behaviors:
+ * <ul>
+ *    <li>each created throwable is registered in {@link CaptureStorage#captureThrowable(Throwable)}
+ *    to be able to access the async stack trace in {@code printStackTrace} methods via {@link CaptureStorage#getAsyncStackTrace(Throwable)};</li>
+ *    <li>the raw VM backtrace is extracted and passed to {@link ThrowableInterner}
+ *    through {@link CaptureStorage#captureThrowableBacktrace(Object)}.</li>
+ * </ul>
+ */
 class ThrowableTransformer implements ClassFileTransformer {
 
     static final String THROWABLE_NAME = CaptureAgent.getInternalClsName(Throwable.class);
@@ -26,12 +35,18 @@ class ThrowableTransformer implements ClassFileTransformer {
                 return transformer.accept(new ClassVisitor(Opcodes.API_VERSION, transformer.writer) {
                     private String myBacktraceFieldName;
                     private String myBacktraceFieldDescriptor;
+                    private boolean myMultipleBacktraceFields;
 
                     @Override
                     public FieldVisitor visitField(int access, String name, String descriptor, String signature, Object value) {
                         if (isBacktraceField(name, descriptor)) {
-                            myBacktraceFieldName = name;
-                            myBacktraceFieldDescriptor = descriptor;
+                            if (myBacktraceFieldName == null) {
+                                myBacktraceFieldName = name;
+                                myBacktraceFieldDescriptor = descriptor;
+                            } else {
+                                myMultipleBacktraceFields = true;
+                                ThrowableInterner.disable("Capture agent: cannot capture Throwable backtrace, ambiguous backtrace fields found");
+                            }
                         }
                         return super.visitField(access, name, descriptor, signature, value);
                     }
@@ -41,19 +56,21 @@ class ThrowableTransformer implements ClassFileTransformer {
                         MethodVisitor superMethodVisitor = super.visitMethod(access, name, descriptor, signature, exceptions);
                         switch (name) {
                             case "<init>":
-                                // Insert CaptureStorage calls in the end of constructors.
+                                // Insert extra calls at the end of constructors.
                                 return new MethodVisitor(api, superMethodVisitor) {
                                     @Override
                                     public void visitInsn(int opcode) {
                                         if (opcode == Opcodes.RETURN) {
-                                            if (myBacktraceFieldName != null) {
+                                            if (myBacktraceFieldName != null && !myMultipleBacktraceFields) {
+                                                // Extract backtrace.
                                                 mv.visitVarInsn(Opcodes.ALOAD, 0);
                                                 mv.visitFieldInsn(Opcodes.GETFIELD, THROWABLE_NAME, myBacktraceFieldName, myBacktraceFieldDescriptor);
                                                 CaptureAgent.invokeStorageMethod(mv, "captureThrowableBacktrace");
                                             }
                                             else {
-                                                ThrowableInterner.disable("Capture agent: cannot capture Throwable backtrace, no supported backtrace field was found");
+                                                ThrowableInterner.disable("Capture agent: cannot capture Throwable backtrace, no supported backtrace field was found before the constructor");
                                             }
+                                            // Perform async stack trace capture.
                                             mv.visitVarInsn(Opcodes.ALOAD, 0);
                                             CaptureAgent.invokeStorageMethod(mv, "captureThrowable");
                                         }
@@ -92,7 +109,10 @@ class ThrowableTransformer implements ClassFileTransformer {
     }
 
     private static boolean isBacktraceField(String name, String descriptor) {
-        if (!"backtrace".equals(name) && !"walkback".equals(name)) return false;
-        return descriptor.startsWith("L") || descriptor.startsWith("[");
+        // HotSpot: Object backtrace
+        // OpenJ9: Object walkback
+        // Moreover, we accept any reference type just to be ready for any variations.
+        return ("backtrace".equals(name) || "walkback".equals(name)) &&
+                (descriptor.startsWith("L") || descriptor.startsWith("["));
     }
 }
