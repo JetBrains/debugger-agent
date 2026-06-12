@@ -79,20 +79,12 @@ final class ThrowableInterner {
     }
 
     private static final class BacktraceKey {
-        private final Class<?> myThrowableClass;
         private final Object myBacktrace;
         private final int myHashCode;
 
         private BacktraceKey(Throwable throwable, Object backtrace) {
-            myThrowableClass = throwable.getClass();
             myBacktrace = backtrace;
-            myHashCode = computeHashCode(myThrowableClass, backtrace);
-        }
-
-        private static int computeHashCode(Class<?> throwableClass, Object backtrace) {
-            int result = throwableClass.hashCode();
-            result = 31 * result + backtraceHashCode(backtrace);
-            return result;
+            myHashCode = backtraceHashCode(backtrace);
         }
 
         @Override
@@ -102,7 +94,6 @@ final class ThrowableInterner {
 
             BacktraceKey key = (BacktraceKey) obj;
             return myHashCode == key.myHashCode &&
-                    myThrowableClass == key.myThrowableClass &&
                     backtracesEqual(myBacktrace, key.myBacktrace);
         }
 
