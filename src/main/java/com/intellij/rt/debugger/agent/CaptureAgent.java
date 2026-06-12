@@ -13,7 +13,7 @@ import java.lang.reflect.Method;
 import java.security.ProtectionDomain;
 import java.util.*;
 
-@SuppressWarnings({"UseOfSystemOutOrSystemErr", "CallToPrintStackTrace", "rawtypes"})
+@SuppressWarnings("rawtypes")
 public final class CaptureAgent {
   private static Instrumentation ourInstrumentation;
   private static final Set<Class> mySkipped = new HashSet<>();
@@ -122,7 +122,7 @@ public final class CaptureAgent {
   static void storeClassForDebug(String className, byte[] bytes) {
     if (CaptureStorage.DEBUG) {
       try {
-        FileOutputStream stream = new FileOutputStream("instrumented_" + className.replaceAll("/", "_") + ".class");
+        FileOutputStream stream = new FileOutputStream("instrumented_" + className.replace("/", "_") + ".class");
         try {
           stream.write(bytes);
         }
