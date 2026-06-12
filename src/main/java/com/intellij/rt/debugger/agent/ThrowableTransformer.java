@@ -85,7 +85,6 @@ class ThrowableTransformer implements ClassFileTransformer {
             }
             catch (Exception e) {
                 System.out.println("Capture agent: failed to instrument " + className);
-                //noinspection CallToPrintStackTrace
                 e.printStackTrace();
             }
         }

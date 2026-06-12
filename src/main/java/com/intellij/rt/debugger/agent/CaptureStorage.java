@@ -12,7 +12,6 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-@SuppressWarnings({"UseOfSystemOutOrSystemErr"})
 public final class CaptureStorage {
   public static final String GENERATED_INSERT_METHOD_POSTFIX = "$$$capture";
   private static final ConcurrentIdentityWeakHashMap<Object, CapturedStack> STORAGE_GENERAL = new ConcurrentIdentityWeakHashMap<>();
@@ -646,7 +645,6 @@ public final class CaptureStorage {
   private static void handleException(Throwable e) {
     ENABLED = false;
     System.err.println("Critical error in IDEA Async Stacktraces instrumenting agent. Agent is now disabled. Please report to IDEA support:");
-    //noinspection CallToPrintStackTrace
     e.printStackTrace();
   }
 
