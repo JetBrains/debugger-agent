@@ -18,7 +18,7 @@ import java.util.concurrent.locks.ReentrantLock;
 
 import static com.intellij.rt.debugger.agent.CaptureAgent.getInternalClsName;
 
-@SuppressWarnings({"UseOfSystemOutOrSystemErr", "CallToPrintStackTrace", "rawtypes"})
+@SuppressWarnings("rawtypes")
 public class CollectionBreakpointInstrumentor {
   private static final String OBJECT_TYPE = "Ljava/lang/Object;";
   private static final String STRING_TYPE = "Ljava/lang/String;";
@@ -139,13 +139,9 @@ public class CollectionBreakpointInstrumentor {
   private static void writeDebugInfo(String className, byte[] bytes) {
     try {
       System.out.println("instrumented: " + className);
-      FileOutputStream stream = new FileOutputStream("instrumented_" + className.replaceAll("/", "_") + ".class");
-      try {
-        stream.write(bytes);
-      }
-      finally {
-        stream.close();
-      }
+        try (FileOutputStream stream = new FileOutputStream("instrumented_" + className.replace("/", "_") + ".class")) {
+            stream.write(bytes);
+        }
     }
     catch (IOException e) {
       e.printStackTrace();
