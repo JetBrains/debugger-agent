@@ -32,6 +32,7 @@ public final class CaptureStorage {
   );
 
   static final double DEFAULT_OVERHEAD_PERCENT = 50;
+  private static final String PACKAGE_PREFIX = CaptureStorage.class.getPackage().getName();
   private static OverheadDetector ourOverheadDetector = new OverheadDetector(DEFAULT_OVERHEAD_PERCENT, true);
 
   static void init(Properties properties) {
@@ -650,7 +651,7 @@ public final class CaptureStorage {
   }
 
   static boolean isAgentFrame(StackTraceElement elem) {
-    return elem.getClassName().startsWith(CaptureStorage.class.getPackage().getName());
+    return elem.getClassName().startsWith(PACKAGE_PREFIX);
   }
 
   static List<StackTraceElement> getCurrentStackTraceWithoutAgentFrames() {
