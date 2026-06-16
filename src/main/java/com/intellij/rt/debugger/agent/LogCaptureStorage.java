@@ -144,8 +144,7 @@ public class LogCaptureStorage {
         ENABLED = true;
         STDOUT_CAPTURE_ENABLED = logCaptureEnabled;
         BATCHING_ENABLED = Boolean.parseBoolean(properties.getProperty(BATCHING_ENABLED_PROPERTY, "true"));
-        // Split in 2 halves for raw events and compressed batches.
-        BUFFER_SIZE = getBufferSize(properties) / 2;
+        BUFFER_SIZE = getBufferSize(properties);
         if (BATCHING_ENABLED && !batchingSchedulerStarted) {
             batchingSchedulerStarted = true;
 
@@ -298,10 +297,21 @@ public class LogCaptureStorage {
 
     private static void flushBatchedData(boolean forceOutput) throws IOException {
         clearConfirmedBatches();
-        if (forceOutput || currentEventsEstimatedBytes() > BUFFER_SIZE) {
+        if (forceOutput) {
             packRawEvents();
+        } else {
+            long eventsBytes = currentEventsEstimatedBytes();
+            long packedBytes = PACKED_BATCHES_BYTES.get();
+            if (eventsBytes + packedBytes <= BUFFER_SIZE) {
+                return;
+            }
+            packRawEvents();
+            packedBytes = PACKED_BATCHES_BYTES.get();
+            // We will zip too often if there is little space for raw events.
+            if (packedBytes <= BUFFER_SIZE * 9 / 10) {
+                return;
+            }
         }
-        if (!forceOutput && PACKED_BATCHES_BYTES.get() <= BUFFER_SIZE) return;
         List<PackedBatch> packedBatchesSnapshot = new ArrayList<>(PACKED_BATCHES);
         if (packedBatchesSnapshot.isEmpty()) return;
 
