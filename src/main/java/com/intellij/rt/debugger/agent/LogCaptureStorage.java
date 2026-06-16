@@ -27,7 +27,7 @@ public class LogCaptureStorage {
     static final String BATCHING_ENABLED_PROPERTY = "logCaptureBatchingEnabled";
     static final String BATCHING_FLUSH_PERIOD_PROPERTY = "logCaptureBatchingFlushPeriod";
     static final String BATCHING_BUFFER_SIZE_PROPERTY = "logCaptureBatchingBufferSize";
-    private static final long DEFAULT_BUFFER_SIZE = calculateDefaultBufferSize();
+    static final String FORCE_BATCHING_BUFFER_SIZE_PROPERTY = "logCaptureForceBatchingBufferSize";
     private static final int ESTIMATED_THROWABLE_BYTES = 3000;
 
     private static boolean BATCHING_ENABLED;
@@ -150,16 +150,17 @@ public class LogCaptureStorage {
         return true;
     }
 
-    static long calculateDefaultBufferSize() {
-        long defaultMax = 5L * 1024L * 1024L; // 5 MB
-        long runtimeMax = Runtime.getRuntime().maxMemory() / 100; // 1% of max heap
-        return Math.min(defaultMax, runtimeMax);
-    }
-
     static long getBufferSize(Properties properties) {
-        return Long.parseLong(properties.getProperty(
-                BATCHING_BUFFER_SIZE_PROPERTY,
-                String.valueOf(DEFAULT_BUFFER_SIZE)));
+        String forcedBufferSize = properties.getProperty(FORCE_BATCHING_BUFFER_SIZE_PROPERTY);
+        if (forcedBufferSize != null) {
+            return Long.parseLong(forcedBufferSize);
+        }
+        String stringMaxSize = properties.getProperty(BATCHING_BUFFER_SIZE_PROPERTY);
+        long maxBufferSize = stringMaxSize == null
+                ? 5 * 1024L * 1024L // 5MB
+                : Long.parseLong(stringMaxSize);
+        long runtimeMax = Runtime.getRuntime().maxMemory() / 100; // 1% of max heap
+        return Math.min(maxBufferSize, runtimeMax);
     }
 
     private static long createNextEventId(int eventType) {
