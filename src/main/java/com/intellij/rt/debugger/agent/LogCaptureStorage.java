@@ -34,8 +34,18 @@ public class LogCaptureStorage {
     private static long BUFFER_SIZE;
     private static boolean STDOUT_CAPTURE_ENABLED;
 
-    // It's used by the debugger.
+    // The debugger reads this value via evaluation to learn how many events have been created by the agent.
+    // The agent owns all writes.
     static final AtomicLong EVENT_COUNTER = new AtomicLong();
+
+    /**
+     * The debugger writes the greatest event id that was received and decoded successfully via the {@link #packBatchedData()} call.
+     * The confirmation is done outside the method itself because it can be called multiple times (see javadoc).
+     * The confirmation is not guaranteed, it is used only as an optimization against repeated sending of the same events.
+     * <p>
+     * The agent checks the flushed state based on this field and {@link #LAST_FLUSHED_EVENT_ID}.
+     */
+    static volatile long CONFIRMED_FLUSHED_EVENT_ID = -1;
 
     // It contains raw events that are waiting to be packed.
     // New ones could be added concurrently.
@@ -83,6 +93,20 @@ public class LogCaptureStorage {
         @Override
         public boolean markRemoved() {
             return removed.compareAndSet(false, true);
+        }
+
+        @Override
+        public int hashCode() {
+            // This override is not necessary for correctness, but it is a bit faster than Object.hashCode.
+            return (int) (id ^ (id >>> 32));
+        }
+
+        @Override
+        public final boolean equals(Object o) {
+            if (!(o instanceof Event)) return false;
+
+            Event event = (Event) o;
+            return id == event.id;
         }
     }
 
@@ -235,6 +259,7 @@ public class LogCaptureStorage {
      * before it appears on the debugger side. The clearing happens in the periodic flush cycle.
      */
     static String packBatchedData() throws IOException {
+        clearConfirmedBatches();
         packRawEvents();
         List<PackedBatch> packedBatchesSnapshot = new ArrayList<>(PACKED_BATCHES);
         if (packedBatchesSnapshot.isEmpty()) return null;
@@ -272,6 +297,7 @@ public class LogCaptureStorage {
     }
 
     private static void flushBatchedData(boolean forceOutput) throws IOException {
+        clearConfirmedBatches();
         if (forceOutput || currentEventsEstimatedBytes() > BUFFER_SIZE) {
             packRawEvents();
         }
@@ -280,9 +306,25 @@ public class LogCaptureStorage {
         if (packedBatchesSnapshot.isEmpty()) return;
 
         outputWritten(packBatches(packedBatchesSnapshot));
-        long removedBytes = removeItems(PACKED_BATCHES, packedBatchesSnapshot);
+        markBatchesFlushed(packedBatchesSnapshot);
+    }
+
+    private static void markBatchesFlushed(Collection<PackedBatch> batches) {
+        long removedBytes = removeItems(PACKED_BATCHES, batches);
         PACKED_BATCHES_BYTES.addAndGet(-removedBytes);
-        setIfGreater(LAST_FLUSHED_EVENT_ID, findMaxPackedEventId(packedBatchesSnapshot));
+        setIfGreater(LAST_FLUSHED_EVENT_ID, findMaxPackedEventId(batches));
+    }
+
+    private static void clearConfirmedBatches() {
+        long confirmedId = CONFIRMED_FLUSHED_EVENT_ID;
+        if (confirmedId <= LAST_FLUSHED_EVENT_ID.get()) return;
+        Set<PackedBatch> alreadyConfirmed = new HashSet<>();
+        for (PackedBatch batch : PACKED_BATCHES) {
+            if (batch.lastEventId <= confirmedId) {
+                alreadyConfirmed.add(batch);
+            }
+        }
+        markBatchesFlushed(alreadyConfirmed);
     }
 
     private static byte[] packBytes(List<Event> events) throws IOException {
@@ -388,7 +430,7 @@ public class LogCaptureStorage {
     }
 
     private static <T extends MemoryFootprintEstimate> long removeItems(ConcurrentLinkedQueue<T> queue, Collection<T> items) {
-        Set<T> itemsToRemove = new HashSet<>(items);
+        Set<T> itemsToRemove = items instanceof Set ? (Set<T>) items : new HashSet<>(items);
 
         long removedBytes = 0;
         for (Iterator<T> queueIterator = queue.iterator(); queueIterator.hasNext(); ) {
