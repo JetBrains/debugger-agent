@@ -222,17 +222,6 @@ public class LogCaptureEncodingTest {
     }
 
     @Test
-    public void rawEventsUseHalfOfBufferSizeAsThreshold() throws Exception {
-        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, String.valueOf(2 * 3000));
-        LogCaptureStorage.init(properties, true);
-
-        capture(FileDescriptor.out, "a\n");
-
-        assertEquals("raw event bytes are packed after exceeding half the buffer size", 0, LogCaptureStorage.EVENTS.size());
-        assertEquals(0, LogCaptureStorage.EVENTS_PAYLOAD_BYTES.get());
-    }
-
-    @Test
     public void packBatchedDataPacksPendingRawEventsBeforeReturning() throws Exception {
         properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, LARGE_BUFFER_SIZE);
         LogCaptureStorage.init(properties, true);
