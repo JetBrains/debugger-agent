@@ -143,7 +143,7 @@ public class ThrowableCapacityOverhead {
         Properties properties = new Properties();
         properties.put(LogCaptureStorage.BATCHING_ENABLED_PROPERTY, "true");
         properties.put(LogCaptureStorage.BATCHING_FLUSH_PERIOD_PROPERTY, "999999999");
-        properties.put(LogCaptureStorage.BATCHING_BUFFER_SIZE_PROPERTY, String.valueOf(Long.MAX_VALUE));
+        properties.put(LogCaptureStorage.FORCE_BATCHING_BUFFER_SIZE_PROPERTY, String.valueOf(Long.MAX_VALUE));
         LogCaptureStorage.init(properties, true);
 
         recursiveCapture(stackDepth, repeats, "stdout message\n".getBytes(StandardCharsets.UTF_8));
