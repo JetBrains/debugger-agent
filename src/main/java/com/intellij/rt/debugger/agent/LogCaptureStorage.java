@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.zip.Deflater;
 import java.util.zip.GZIPOutputStream;
 
 public class LogCaptureStorage {
@@ -331,7 +332,7 @@ public class LogCaptureStorage {
         assert !events.isEmpty();
 
         ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
-        try (GZIPOutputStream gos = new GZIPOutputStream(bas);
+        try (GZIPOutputStream gos = new FastGzipOutputStream(bas);
              DataOutputStream dos = new DataOutputStream(gos)) {
             CapturedStackDeduplicator.StackDictionary stackDictionary =
                     CapturedStackDeduplicator.createStackDictionary(events, MAX_STACK_DEPTH);
@@ -357,6 +358,13 @@ public class LogCaptureStorage {
         }
         // ensure to close the gzip stream before extracting compressed data.
         return bas.toByteArray();
+    }
+
+    private static class FastGzipOutputStream extends GZIPOutputStream {
+        FastGzipOutputStream(ByteArrayOutputStream out) throws IOException {
+            super(out);
+            def.setLevel(Deflater.BEST_SPEED);
+        }
     }
 
     private static byte[] packStack(List<StackTraceElement> stackTrace) throws IOException {
