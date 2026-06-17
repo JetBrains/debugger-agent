@@ -29,21 +29,19 @@ final class CapturedStackDeduplicator {
 
     private final List<LogCaptureStorage.Event> events;
     private final int maxStackDepth;
-    private final ArrayList<List<StackTraceElement>> stacks;
+    private final ArrayList<List<StackTraceElement>> stacks = new ArrayList<>();
     private final int[] throwableStackIds;
     private final int[] capturedStackIds;
-    private final IdentityHashMap<Throwable, StackRef> throwableStacks;
-    private final IdentityHashMap<CaptureStorage.CapturedStack, CapturedStackInfo> capturedStacks;
+    private final IdentityHashMap<Throwable, StackRef> throwableStacks = new IdentityHashMap<>();
+    private final IdentityHashMap<CaptureStorage.CapturedStack, CapturedStackInfo> capturedStacks = new IdentityHashMap<>();
 
     private CapturedStackDeduplicator(List<LogCaptureStorage.Event> events, int maxStackDepth) {
         this.events = events;
         this.maxStackDepth = maxStackDepth;
+
         int eventCount = events.size();
-        stacks = new ArrayList<>();
         throwableStackIds = new int[eventCount];
         capturedStackIds = new int[eventCount];
-        throwableStacks = new IdentityHashMap<>();
-        capturedStacks = new IdentityHashMap<>();
     }
 
     static StackDictionary createStackDictionary(List<LogCaptureStorage.Event> events, int maxStackDepth) {

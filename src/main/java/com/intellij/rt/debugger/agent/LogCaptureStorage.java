@@ -29,7 +29,7 @@ public class LogCaptureStorage {
     static final String BATCHING_FLUSH_PERIOD_PROPERTY = "logCaptureBatchingFlushPeriod";
     static final String BATCHING_BUFFER_SIZE_PROPERTY = "logCaptureBatchingBufferSize";
     static final String FORCE_BATCHING_BUFFER_SIZE_PROPERTY = "logCaptureForceBatchingBufferSize";
-    private static final int ESTIMATED_THROWABLE_BYTES = 3000;
+    private static final int ESTIMATED_THROWABLE_BYTES = 3000; // See the comment at the top of ThrowableCapacityOverhead
 
     private static boolean BATCHING_ENABLED;
     private static long BUFFER_SIZE;
@@ -50,24 +50,35 @@ public class LogCaptureStorage {
 
     // It contains raw events that are waiting to be packed.
     // New ones could be added concurrently.
-    // Raw or packed data can be flushed concurrently, leading to sending the same events multiple times.
-    // It's ok and is handled by the debugger using IDs.
     static final ConcurrentLinkedQueue<Event> EVENTS = new ConcurrentLinkedQueue<>();
     static final AtomicLong EVENTS_PAYLOAD_BYTES = new AtomicLong();
+
+    // It contains packed batches that are waiting to be sent.
+    // New ones could be added concurrently.
     static final ConcurrentLinkedQueue<PackedBatch> PACKED_BATCHES = new ConcurrentLinkedQueue<>();
     static final AtomicLong PACKED_BATCHES_BYTES = new AtomicLong();
 
+    // Raw or packed data can be flushed concurrently, leading to sending the same events multiple times.
+    // It's ok and is handled by the debugger using IDs.
     static final AtomicLong LAST_FLUSHED_EVENT_ID = new AtomicLong(-1);
     static final AtomicLong LAST_PACKED_EVENT_ID = new AtomicLong(-1);
     static final AtomicLong LAST_LOGGING_BREAKPOINT_EVENT_ID = new AtomicLong(-1);
 
-    private interface MemoryFootprintEstimate {
-        int memoryFootprintEstimate();
+    private abstract static class MemoryFootprintEstimate {
+        private final AtomicBoolean removed = new AtomicBoolean();
 
-        boolean markRemoved();
+        public abstract int memoryFootprintEstimate();
+
+        /** Returns true if the event was removed for the first time. */
+        public boolean markRemoved() {
+            return removed.compareAndSet(false, true);
+        }
     }
 
-    static class Event implements MemoryFootprintEstimate {
+    /**
+     * A single event.
+     */
+    static class Event extends MemoryFootprintEstimate {
         public static final byte STD_OUTPUT_TYPE = 0;
         public static final byte LOGGING_BREAKPOINT_TYPE = 1;
 
@@ -76,7 +87,6 @@ public class LogCaptureStorage {
         public final byte[] payload;
         public final Throwable throwable;
         public final CaptureStorage.CapturedStack stack;
-        private final AtomicBoolean removed = new AtomicBoolean();
 
         public Event(long id, byte type, byte[] payload, Throwable throwable, CaptureStorage.CapturedStack stack) {
             this.id = id;
@@ -89,11 +99,6 @@ public class LogCaptureStorage {
         @Override
         public int memoryFootprintEstimate() {
             return payload.length;
-        }
-
-        @Override
-        public boolean markRemoved() {
-            return removed.compareAndSet(false, true);
         }
 
         @Override
@@ -111,10 +116,12 @@ public class LogCaptureStorage {
         }
     }
 
-    static class PackedBatch implements MemoryFootprintEstimate {
+    /**
+     * Multiple events, compressed and packed. Batch is prepared to be sent to the debugger.
+     */
+    static class PackedBatch extends MemoryFootprintEstimate {
         public final byte[] data;
         public final long lastEventId;
-        private final AtomicBoolean removed = new AtomicBoolean();
 
         public PackedBatch(byte[] data, long lastEventId) {
             this.data = data;
@@ -124,11 +131,6 @@ public class LogCaptureStorage {
         @Override
         public int memoryFootprintEstimate() {
             return data.length;
-        }
-
-        @Override
-        public boolean markRemoved() {
-            return removed.compareAndSet(false, true);
         }
     }
 
