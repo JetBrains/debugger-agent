@@ -157,14 +157,7 @@ public class ThrowableCapacityOverhead {
     }
 
     private static void resetLogCaptureStorage() {
-        LogCaptureStorage.EVENT_COUNTER.set(0);
-        LogCaptureStorage.LAST_FLUSHED_EVENT_ID.set(-1);
-        LogCaptureStorage.LAST_LOGGING_BREAKPOINT_EVENT_ID.set(-1);
-        LogCaptureStorage.EVENTS.clear();
-        LogCaptureStorage.EVENTS_PAYLOAD_BYTES.set(0);
-        LogCaptureStorage.PACKED_BATCHES.clear();
-        LogCaptureStorage.PACKED_BATCHES_BYTES.set(0);
-        LogCaptureStorage.outputWrittenDumpForTests = null;
+        LogCaptureStorage.resetStateForTests();
         ThrowableInterner.clear();
     }
 

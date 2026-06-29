@@ -61,8 +61,8 @@ public class LogCaptureStorage {
     // Raw or packed data can be flushed concurrently, leading to sending the same events multiple times.
     // It's ok and is handled by the debugger using IDs.
     static final AtomicLong LAST_FLUSHED_EVENT_ID = new AtomicLong(-1);
-    static final AtomicLong LAST_PACKED_EVENT_ID = new AtomicLong(-1);
-    static final AtomicLong LAST_LOGGING_BREAKPOINT_EVENT_ID = new AtomicLong(-1);
+    private static final AtomicLong LAST_PACKED_EVENT_ID = new AtomicLong(-1);
+    private static final AtomicLong LAST_LOGGING_BREAKPOINT_EVENT_ID = new AtomicLong(-1);
 
     private abstract static class MemoryFootprintEstimate {
         private final AtomicBoolean removed = new AtomicBoolean();
@@ -472,5 +472,17 @@ public class LogCaptureStorage {
                 break;
             }
         }
+    }
+
+    static void resetStateForTests() {
+        EVENT_COUNTER.set(0);
+        LAST_FLUSHED_EVENT_ID.set(-1);
+        LAST_PACKED_EVENT_ID.set(-1);
+        LAST_LOGGING_BREAKPOINT_EVENT_ID.set(-1);
+        EVENTS.clear();
+        EVENTS_PAYLOAD_BYTES.set(0);
+        PACKED_BATCHES.clear();
+        PACKED_BATCHES_BYTES.set(0);
+        outputWrittenDumpForTests = null;
     }
 }
