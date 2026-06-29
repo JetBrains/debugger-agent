@@ -59,6 +59,87 @@ public class LogCaptureEncodingTest {
     }
 
     @Test
+    public void capturesOnlyStdoutPartsStartingAtLineStart() throws Exception {
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "abc");
+        capture(FileDescriptor.out, "def\nxyz");
+
+        try (DataInputStream is = openPackedBatch(LogCaptureStorage.packBatchedData())) {
+            assertEquals(2, is.readInt());
+            readAndCheckStdoutEvent(0, false, "abc", is);
+            readAndCheckStdoutEvent(1, false, "\nxyz", is);
+        }
+    }
+
+    @Test
+    public void treatsCarriageReturnAsLineSeparatorForStdoutCapture() throws Exception {
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "abc");
+        capture(FileDescriptor.out, "def\rxyz");
+
+        try (DataInputStream is = openPackedBatch(LogCaptureStorage.packBatchedData())) {
+            assertEquals(2, is.readInt());
+            readAndCheckStdoutEvent(0, false, "abc", is);
+            readAndCheckStdoutEvent(1, false, "\rxyz", is);
+        }
+    }
+
+    @Test
+    public void ignoresMidLineStdoutChunkWithoutLineSeparator() throws Exception {
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "abc");
+        capture(FileDescriptor.out, "def");
+        capture(FileDescriptor.out, "\nxyz");
+
+        assertEquals("ignored chunks must not consume event ids", 2, LogCaptureStorage.EVENT_COUNTER.get());
+        try (DataInputStream is = openPackedBatch(LogCaptureStorage.packBatchedData())) {
+            assertEquals(2, is.readInt());
+            readAndCheckStdoutEvent(0, false, "abc", is);
+            readAndCheckStdoutEvent(1, false, "\nxyz", is);
+        }
+    }
+
+    @Test
+    public void capturesMidLineStdoutChunkEndingWithLineSeparator() throws Exception {
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "abc");
+        capture(FileDescriptor.out, "def\n");
+        capture(FileDescriptor.out, "xyz");
+
+        try (DataInputStream is = openPackedBatch(LogCaptureStorage.packBatchedData())) {
+            assertEquals(3, is.readInt());
+            readAndCheckStdoutEvent(0, false, "abc", is);
+            readAndCheckStdoutEvent(1, false, "\n", is);
+            readAndCheckStdoutEvent(2, false, "xyz", is);
+        }
+    }
+
+    @Test
+    public void keepsStdoutAndStderrLineStartStatesSeparate() throws Exception {
+        LogCaptureStorage.init(properties, true);
+
+        capture(FileDescriptor.out, "stdout");
+        capture(FileDescriptor.err, "stderr");
+        capture(FileDescriptor.out, "ignored stdout");
+        capture(FileDescriptor.err, "ignored stderr");
+        capture(FileDescriptor.out, "\nnext stdout");
+        capture(FileDescriptor.err, "\rnext stderr");
+
+        assertEquals("ignored chunks must not consume event ids", 4, LogCaptureStorage.EVENT_COUNTER.get());
+        try (DataInputStream is = openPackedBatch(LogCaptureStorage.packBatchedData())) {
+            assertEquals(4, is.readInt());
+            readAndCheckStdoutEvent(0, false, "stdout", is);
+            readAndCheckStdoutEvent(1, true, "stderr", is);
+            readAndCheckStdoutEvent(2, false, "\nnext stdout", is);
+            readAndCheckStdoutEvent(3, true, "\rnext stderr", is);
+        }
+    }
+
+    @Test
     public void batchesLoggingBreakpointEvents() throws Exception {
         LogCaptureStorage.init(properties, false);
 

@@ -139,6 +139,13 @@ public class LogCaptureStorage {
 
     private static final int MAX_STACK_DEPTH = 100; // It should be enough, we usually need only a few first frames.
 
+    // This state is true if the next line will be the beginning of a line.
+    //
+    // Best-effort state. PrintStream synchronizes the common System.out/err path.
+    // Direct concurrent writes to the same file descriptor don't have a reliable line order for us to preserve.
+    private static volatile boolean lineStartStateStdout = true;
+    private static volatile boolean lineStartStateStderr = true;
+
 
     private static boolean batchingSchedulerStarted;
     static ArrayList<String> outputWrittenDumpForTests = null;
@@ -216,11 +223,14 @@ public class LogCaptureStorage {
             if (!STDOUT_CAPTURE_ENABLED) return;
 
             boolean isErr = fd == FD_ERR;
+            OutputSlice outputSlice = findOutputSliceToCapture(isErr, bytes, off, len);
+            if (outputSlice == null) return;
+
             long id = createNextEventId(Event.STD_OUTPUT_TYPE);
             ByteArrayOutputStream bas = new ByteArrayOutputStream(); // no need to close it
             try (DataOutputStream dos = new DataOutputStream(bas)) {
-                dos.writeInt(len);
-                dos.write(bytes, off, len);
+                dos.writeInt(outputSlice.len);
+                dos.write(bytes, outputSlice.off, outputSlice.len);
                 dos.writeBoolean(isErr);
             }
             byte[] payload = bas.toByteArray();
@@ -229,6 +239,58 @@ public class LogCaptureStorage {
             handleException(e);
         } finally {
             CAPTURING.set(false);
+        }
+    }
+
+    private static OutputSlice findOutputSliceToCapture(boolean isErr, byte[] bytes, int off, int len) {
+        boolean wasAtLineStart = isErr ? lineStartStateStderr : lineStartStateStdout;
+        assert len > 0;
+        boolean willBeAtLineStart = isLineSeparator(bytes[off + len - 1]);
+        if (isErr) {
+            lineStartStateStderr = willBeAtLineStart;
+        } else {
+            lineStartStateStdout = willBeAtLineStart;
+        }
+
+        if (wasAtLineStart) {
+            // Regular string at the beginning of the line.
+            return new OutputSlice(off, len);
+        }
+
+        // It's some kind of suffix.
+        // But we match only prefixes or whole lines. So we skip suffix part.
+
+        int lineSep = findFirstLineSeparator(bytes, off, len);
+        if (lineSep == -1) {
+            // It's an infix string. We can ignore it completely.
+            return null;
+        }
+
+        // It's a suffix string. We should capture it everything starting from the line separator.
+        // We could skip it if it's just a line break, but we leave it for consistency, to preserve all line breaks.
+        return new OutputSlice(lineSep, len + off - lineSep);
+    }
+
+    private static int findFirstLineSeparator(byte[] bytes, int off, int len) {
+        for (int i = off; i < off + len; i++) {
+            if (isLineSeparator(bytes[i])) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private static boolean isLineSeparator(byte b) {
+        return b == '\n' || b == '\r';
+    }
+
+    private static class OutputSlice {
+        final int off;
+        final int len;
+
+        OutputSlice(int off, int len) {
+            this.off = off;
+            this.len = len;
         }
     }
 
@@ -484,5 +546,7 @@ public class LogCaptureStorage {
         PACKED_BATCHES.clear();
         PACKED_BATCHES_BYTES.set(0);
         outputWrittenDumpForTests = null;
+        lineStartStateStdout = true;
+        lineStartStateStderr = true;
     }
 }
