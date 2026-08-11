@@ -16,12 +16,15 @@ public final class CaptureStorage {
   public static final String GENERATED_INSERT_METHOD_POSTFIX = "$$$capture";
   private static final ConcurrentIdentityWeakHashMap<Object, CapturedStack> STORAGE_GENERAL = new ConcurrentIdentityWeakHashMap<>();
   private static final ConcurrentIdentityWeakHashMap<Throwable, CapturedStack> STORAGE_THROWABLES = new ConcurrentIdentityWeakHashMap<>();
+  private static final ConcurrentIdentityWeakHashMap<Object, ConcurrentMap<Object, CapturedStack>> STORAGE_INDEXED =
+          new ConcurrentIdentityWeakHashMap<>();
+  private static final Object NULL_INDEX = new Object();
 
-  private static final ConcurrentIdentityWeakHashMap<Thread, Deque<CapturedStack>> THREAD_TO_STACKS_MAP = new ConcurrentIdentityWeakHashMap<>();
+  private static final ConcurrentIdentityWeakHashMap<Thread, Deque<CurrentStackFrame>> THREAD_TO_STACKS_MAP = new ConcurrentIdentityWeakHashMap<>();
 
-  private static final ThreadLocal<Deque<CapturedStack>> CURRENT_STACKS = new ThreadLocal<Deque<CapturedStack>>() {
+  private static final ThreadLocal<Deque<CurrentStackFrame>> CURRENT_STACKS = new ThreadLocal<Deque<CurrentStackFrame>>() {
     @Override
-    protected Deque<CapturedStack> initialValue() {
+    protected Deque<CurrentStackFrame> initialValue() {
       return new LinkedList<>();
     }
   };
@@ -55,10 +58,10 @@ public final class CaptureStorage {
     }
   };
 
-  private static Deque<CapturedStack> getStacksForCurrentThread() {
+  private static Deque<CurrentStackFrame> getStacksForCurrentThread() {
     if (storeAsyncStackTracesForAllThreads) {
       Thread currentThread = Thread.currentThread();
-      Deque<CapturedStack> capturedStacks = THREAD_TO_STACKS_MAP.get(currentThread);
+      Deque<CurrentStackFrame> capturedStacks = THREAD_TO_STACKS_MAP.get(currentThread);
       if (capturedStacks == null) {
         capturedStacks = new LinkedList<>();
         THREAD_TO_STACKS_MAP.put(currentThread, capturedStacks);
@@ -70,17 +73,18 @@ public final class CaptureStorage {
   }
 
   static CapturedStack getCurrentCapturedStack() {
-    return getStacksForCurrentThread().peekLast();
+    return peekCurrentStack(getStacksForCurrentThread());
   }
 
   @SuppressWarnings("StaticNonFinalField")
-  public static boolean DEBUG; // set from debugger
+  public static boolean DEBUG = true; // set from debugger
   private static boolean ENABLED = true; // set from debugger
 
   static final StackTraceElement ASYNC_STACK_ELEMENT =
           new StackTraceElement("--- Async", "Stack.Trace --- ", "captured by IntelliJ IDEA debugger", -1);
   static final StackTraceElement THROTTLED_STACK_ELEMENT =
           new StackTraceElement("< Unknown", "Stack > ", "was not captured due to throttling", -1);
+  private static final int DEBUG_ASYNC_STACK_TRACE_LIMIT = Integer.getInteger("debugger.agent.debug.async.stack.trace.limit", 256);
 
   //// METHODS CALLED FROM THE USER PROCESS
 
@@ -89,39 +93,17 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    ThreadLocalContext context = CURRENT_CONTEXT.get();
-    boolean executed = runWithOverheadTrackingAndWithoutThrowableCapture(context, new Runnable() {
+    captureCurrentStack(new CapturedStackStore() {
       @Override
-      public void run() {
-        try {
-          if (DEBUG) {
-            System.out.println("captureGeneral " + getCallerDescriptorForLogging() + " - " + getKeyText(key));
-          }
-          CapturedStack stack = getStacksForCurrentThread().peekLast();
-          STORAGE_GENERAL.put(key, createCapturedStack(new Throwable(), stack));
-        }
-        // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
-        catch (AssertionError | Exception e) {
-          handleException(e);
-        }
+      public void put(CapturedStack stack) {
+        STORAGE_GENERAL.put(key, stack);
       }
-    });
-    if (executed) return;
-    // Overhead detected, add marker stack
-    runWithoutThrowableCapture(context, new Runnable() {
+
       @Override
-      public void run() {
-        try {
-          if (DEBUG) {
-            System.out.println("captureGeneral (throttled) " + getCallerDescriptorForLogging() + " - " + getKeyText(key));
-          }
-          // skip previously captured stacks to minimize overhead
-          STORAGE_GENERAL.put(key, ThrottledCapturedStack.INSTANCE);
-        } catch (AssertionError | Exception e) {
-          handleException(e);
-        }
+      public String getDescription() {
+        return getKeyText(key);
       }
-    });
+    }, "captureGeneral");
   }
 
   @SuppressWarnings("unused")
@@ -141,9 +123,9 @@ public final class CaptureStorage {
         // TODO: support coroutine stack traces
         try {
           if (DEBUG) {
-            System.out.println("captureThrowable " + getCallerDescriptorForLogging() + " - " + getKeyText(throwable));
+            //System.out.println("captureThrowable " + getCallerDescriptorForLogging() + " - " + getKeyText(throwable));
           }
-          CapturedStack stack = getStacksForCurrentThread().peekLast();
+          CapturedStack stack = getCurrentCapturedStack();
           if (stack != null) {
             // Ensure that we don't leak throwable here, IDEA-360126
             assert !(stack instanceof ExceptionCapturedStack) ||
@@ -169,12 +151,12 @@ public final class CaptureStorage {
       public void run() {
         try {
           CapturedStack stack = STORAGE_GENERAL.get(key);
-          Deque<CapturedStack> currentStacks = getStacksForCurrentThread();
-          currentStacks.add(stack);
-          if (DEBUG) {
-            System.out.println(
-                    "insert " + getCallerDescriptorForLogging() + " -> " + getKeyText(key) + ", stack saved (" + currentStacks.size() + ")");
-          }
+          logStorageEvent("insertEnter",
+                  "before stack is pushed " + getCallerDescriptorForLogging() + " -> " + getKeyText(key),
+                  stack);
+          pushCurrentStack(stack);
+          logStorageEvent("insertEnter",
+                  "after stack is pushed " + getCallerDescriptorForLogging() + " -> " + getKeyText(key));
         }
         catch (Exception e) {
           handleException(e);
@@ -192,19 +174,56 @@ public final class CaptureStorage {
       @Override
       public void run() {
         try {
-          Deque<CapturedStack> currentStacks = getStacksForCurrentThread();
           // frameworks may modify thread locals to avoid memory leaks, so do not fail if currentStacks is empty
           // check https://youtrack.jetbrains.com/issue/IDEA-357455 for more details
-          currentStacks.pollLast();
-          if (DEBUG) {
-            System.out.println(
-                    "insert " + getCallerDescriptorForLogging() + " <- " + getKeyText(key) + ", stack removed (" + currentStacks.size() + ")");
-          }
+          int currentStackCount = popCurrentStack();
+          logStorageEvent("insertExit",
+                          getCallerDescriptorForLogging() + " <- " + getKeyText(key) + ", stack removed (" + currentStackCount + ")");
         } catch (Exception e) {
           handleException(e);
         }
       }
     });
+  }
+
+  @SuppressWarnings("unused")
+  public static void captureSharedFlowStacktrace(final Object sharedFlow, final long index) {
+    captureIndexedStack(sharedFlow, Long.valueOf(index));
+  }
+
+  @SuppressWarnings("unused")
+  public static void insertEnterSharedFlowStacktrace(final Object sharedFlow, final long index) {
+    insertEnterIndexedStack(sharedFlow, Long.valueOf(index));
+  }
+
+  @SuppressWarnings("unused")
+  public static void captureStateFlowStacktrace(final Object stateFlow, final Object state) {
+    captureIndexedStack(stateFlow, state);
+  }
+
+  @SuppressWarnings("unused")
+  public static void insertEnterStateFlowStacktrace(final Object stateFlow, final Object state) {
+    insertEnterIndexedStack(stateFlow, state);
+  }
+
+  @SuppressWarnings("unused")
+  public static void captureChannelStacktrace(final Object segment, final int index) {
+    captureIndexedStack(segment, Integer.valueOf(index));
+  }
+
+  @SuppressWarnings("unused")
+  public static void insertEnterChannelStacktrace(final Object segment, final int index) {
+    insertEnterIndexedStack(segment, Integer.valueOf(index));
+  }
+
+  @SuppressWarnings("unused")
+  public static void captureChannelSegmentStacktrace(final Object segment, final long index) {
+    captureIndexedStack(segment, Long.valueOf(index));
+  }
+
+  @SuppressWarnings("unused")
+  public static void insertEnterChannelSegmentStacktrace(final Object segment, final long index) {
+    insertEnterIndexedStack(segment, Long.valueOf(index));
   }
 
   private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> COROUTINE_GET_CALLER_FRAME_METHODS = new ConcurrentIdentityWeakHashMap<>();
@@ -268,6 +287,274 @@ public final class CaptureStorage {
     T call();
   }
 
+  private interface CapturedStackStore {
+    void put(CapturedStack stack);
+
+    String getDescription();
+  }
+
+  private static void captureIndexedStack(final Object owner, final Object index) {
+    if (!ENABLED || owner == null) {
+      return;
+    }
+    final Object normalizedIndex = normalizeIndex(index);
+    captureCurrentStack(new CapturedStackStore() {
+      @Override
+      public void put(CapturedStack stack) {
+        putIndexedStack(owner, normalizedIndex, stack);
+      }
+
+      @Override
+      public String getDescription() {
+        return getIndexedKeyText(owner, normalizedIndex);
+      }
+    }, "captureIndexed");
+  }
+
+  private static void captureCurrentStack(final CapturedStackStore store,
+                                          final String debugPrefix) {
+    captureStack(store, debugPrefix);
+  }
+
+  private static void captureStack(final CapturedStackStore store,
+                                   final String debugPrefix) {
+    ThreadLocalContext context = CURRENT_CONTEXT.get();
+    boolean executed = runWithOverheadTrackingAndWithoutThrowableCapture(context, new Runnable() {
+      @Override
+      public void run() {
+        try {
+          CapturedStack previous = getCurrentCapturedStack();
+          logStorageEvent(debugPrefix,
+                  "previous captured stack before merging" + getCallerDescriptorForLogging() + " - " + store.getDescription() +
+                          ", previous current stack: " + getStackIdentity(previous),
+                  previous);
+          CapturedStack capturedStack = createCapturedStack(new Throwable(), previous);
+          store.put(capturedStack);
+          logStorageEvent(debugPrefix,
+                          "after merging with current captured stack" + getCallerDescriptorForLogging() + " - " + store.getDescription() +
+                          ", previous current stack: " + getStackIdentity(previous),
+                          capturedStack);
+        }
+        // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
+        catch (AssertionError | Exception e) {
+          handleException(e);
+        }
+      }
+    });
+    if (executed) return;
+    runWithoutThrowableCapture(context, new Runnable() {
+      @Override
+      public void run() {
+        try {
+          // skip previously captured stacks to minimize overhead
+          store.put(ThrottledCapturedStack.INSTANCE);
+          logStorageEvent(debugPrefix + " (throttled)",
+                          getCallerDescriptorForLogging() + " - " + store.getDescription(),
+                          ThrottledCapturedStack.INSTANCE);
+        }
+        catch (AssertionError | Exception e) {
+          handleException(e);
+        }
+      }
+    });
+  }
+
+  private static void insertEnterIndexedStack(final Object owner, final Object index) {
+    if (!ENABLED || owner == null) {
+      return;
+    }
+    final Object normalizedIndex = normalizeIndex(index);
+    runWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
+      @Override
+      public void run() {
+        try {
+          CapturedStack stack = getIndexedStack(owner, normalizedIndex);
+          logStorageEvent("insertEnterIndexedStack",
+                          "before stack is saved " + getCallerDescriptorForLogging() + " -> " +
+                          getIndexedKeyText(owner, normalizedIndex),
+                          stack);
+          int currentStackCount = pushCurrentIndexedStack(stack);
+          logStorageEvent("insertEnterIndexedStack",
+                          getCallerDescriptorForLogging() + " -> " + getIndexedKeyText(owner, normalizedIndex) +
+                          ", stack saved (" + currentStackCount + ")");
+        }
+        catch (Exception e) {
+          handleException(e);
+        }
+      }
+    });
+  }
+
+  private static Object normalizeIndex(Object index) {
+    return index == null ? NULL_INDEX : index;
+  }
+
+  private static ConcurrentMap<Object, CapturedStack> getOrCreateIndexedStacks(Object owner) {
+    ConcurrentMap<Object, CapturedStack> result = STORAGE_INDEXED.get(owner);
+    if (result != null) {
+      return result;
+    }
+    ConcurrentMap<Object, CapturedStack> created = new ConcurrentHashMap<>();
+    ConcurrentMap<Object, CapturedStack> existing = STORAGE_INDEXED.putIfAbsent(owner, created);
+    return existing == null ? created : existing;
+  }
+
+  private static void putIndexedStack(Object owner, Object index, CapturedStack stack) {
+    getOrCreateIndexedStacks(owner).put(index, stack);
+  }
+
+  private static CapturedStack getIndexedStack(Object owner, Object index) {
+    ConcurrentMap<Object, CapturedStack> stacks = STORAGE_INDEXED.get(owner);
+    return stacks == null ? null : stacks.get(index);
+  }
+
+  static List<StackTraceElement> getIndexedStackTraceForTests(Object owner, Object index, int limit) {
+    CapturedStack stack = getIndexedStack(owner, normalizeIndex(index));
+    return stack == null ? null : getStackTrace(stack, limit);
+  }
+
+  static CapturedStack getIndexedCapturedStackForTests(Object owner, Object index) {
+    return getIndexedStack(owner, normalizeIndex(index));
+  }
+
+  private static int pushCurrentStack(CapturedStack stack) {
+    return pushCurrentStack(stack, false);
+  }
+
+  private static int pushCurrentIndexedStack(CapturedStack stack) {
+    return stack == null ? getStacksForCurrentThread().size() : pushCurrentStack(stack, true);
+  }
+
+  private static int pushCurrentStack(CapturedStack stack, boolean indexedMatch) {
+    Deque<CurrentStackFrame> stacks = getStacksForCurrentThread();
+    stacks.add(new CurrentStackFrame(stack, indexedMatch));
+    return stacks.size();
+  }
+
+  private static int popCurrentStack() {
+    Deque<CurrentStackFrame> stacks = getStacksForCurrentThread();
+    CurrentStackFrame frame;
+    while ((frame = stacks.pollLast()) != null) {
+      if (!frame.myIndexedMatch) {
+        break;
+      }
+    }
+    return stacks.size();
+  }
+
+  static void clearCurrentStacksForTests() {
+    getStacksForCurrentThread().clear();
+  }
+
+  static int getCurrentStackFrameCountForTests() {
+    return getStacksForCurrentThread().size();
+  }
+
+  private static void logStorageEvent(String event, String details) {
+    logStorageEvent(event, details, null, false);
+  }
+
+  private static void logStorageEvent(String event, String details, CapturedStack affectedStack) {
+    logStorageEvent(event, details, affectedStack, true);
+  }
+
+  private static void logStorageEvent(String event, String details, CapturedStack affectedStack, boolean includeAffectedStack) {
+    if (!DEBUG) {
+      return;
+    }
+    try {
+      Thread thread = Thread.currentThread();
+      StringBuilder message = new StringBuilder();
+      message.append("CaptureStorage.")
+              .append(event)
+              .append(" thread=")
+              .append(getThreadText(thread))
+              .append(" ")
+              .append(details);
+      if (includeAffectedStack) {
+        message.append("\naffected stack: ");
+        appendCapturedStackTrace(message, affectedStack, "  ");
+      }
+      message.append("\ncurrent async stack state: ");
+      appendCurrentStacksDebugString(message, getStacksForCurrentThread());
+      System.out.println(message.toString());
+    }
+    catch (Throwable t) {
+      try {
+        System.out.println("CaptureStorage debug logging failed: " + t);
+      }
+      catch (Throwable ignored) {
+      }
+    }
+  }
+
+  private static String getThreadText(Thread thread) {
+    return thread.getName() + "@" + Integer.toHexString(System.identityHashCode(thread)) + "#" + thread.getId();
+  }
+
+  private static String getStackIdentity(CapturedStack stack) {
+    return stack == null ? "null" : stack.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(stack));
+  }
+
+  private static CapturedStack peekCurrentStack(Deque<CurrentStackFrame> stacks) {
+    CurrentStackFrame frame = stacks.peekLast();
+    return frame == null ? null : frame.myStack;
+  }
+
+  private static void appendCapturedStackTrace(StringBuilder message, CapturedStack stack, String linePrefix) {
+    if (stack == null) {
+      message.append("null");
+      return;
+    }
+    message.append(getStackIdentity(stack));
+    List<StackTraceElement> stackTrace = getStackTrace(stack, DEBUG_ASYNC_STACK_TRACE_LIMIT);
+    if (stackTrace.isEmpty()) {
+      message.append("\n").append(linePrefix).append("<empty>");
+      return;
+    }
+    int count = 0;
+    for (StackTraceElement element : stackTrace) {
+      if (count >= DEBUG_ASYNC_STACK_TRACE_LIMIT) {
+        message.append("\n").append(linePrefix).append("... truncated at ").append(DEBUG_ASYNC_STACK_TRACE_LIMIT).append(" frames");
+        break;
+      }
+      message.append("\n").append(linePrefix);
+      if (element == ASYNC_STACK_ELEMENT) {
+        message.append("--- async boundary ---");
+      }
+      else {
+        message.append("at ").append(element);
+      }
+      count++;
+    }
+  }
+
+  private static void appendCurrentStacksDebugString(StringBuilder message, Deque<CurrentStackFrame> stacks) {
+    message.append("frames=").append(stacks.size());
+    if (stacks.isEmpty()) {
+      message.append("\n  <empty>");
+      return;
+    }
+    int index = 0;
+    for (CurrentStackFrame frame : stacks) {
+      message.append("\n  frame[").append(index).append("] type=");
+      message.append(frame.myIndexedMatch ? "indexed-match" : "insert");
+      message.append(" ");
+      appendCapturedStackTrace(message, frame.myStack, "    ");
+      index++;
+    }
+  }
+
+  private static class CurrentStackFrame {
+    private final CapturedStack myStack;
+    private final boolean myIndexedMatch;
+
+    private CurrentStackFrame(CapturedStack stack, boolean indexedMatch) {
+      myStack = stack;
+      myIndexedMatch = indexedMatch;
+    }
+  }
+
   private static boolean runWithOverheadTrackingAndWithoutThrowableCapture(ThreadLocalContext context, final Runnable runnable) {
   // It's better to disable throwable instrumentation inside our own code for ease of debugging.
     boolean oldValue = context.throwableCaptureDisabled;
@@ -323,8 +610,18 @@ public final class CaptureStorage {
       return map.put(new WeakKey<>(key, referenceQueue), value);
     }
 
+    public V putIfAbsent(K key, V value) {
+      processQueue();
+      return map.putIfAbsent(new WeakKey<>(key, referenceQueue), value);
+    }
+
     public V get(K key) {
       return map.get(new HardKey<>(key));
+    }
+
+    public V remove(K key) {
+      processQueue();
+      return map.remove(new HardKey<>(key));
     }
 
     private void processQueue() {
@@ -392,9 +689,12 @@ public final class CaptureStorage {
   }
 
   private static CapturedStack createCapturedStack(Throwable exception, CapturedStack insertMatch) {
-    ExceptionCapturedStack exceptionStack = new ExceptionCapturedStack(exception);
+    return appendCapturedStack(new ExceptionCapturedStack(exception), insertMatch);
+  }
+
+  private static CapturedStack appendCapturedStack(CapturedStack current, CapturedStack insertMatch) {
     if (insertMatch != null) {
-      CapturedStack stack = new DeepCapturedStack(exceptionStack, insertMatch);
+      CapturedStack stack = new DeepCapturedStack(current, insertMatch);
       if (stack.getRecursionDepth() > 100) {
         ArrayList<StackTraceElement> trace = getStackTrace(stack, 500);
         trace.trimToSize();
@@ -402,7 +702,7 @@ public final class CaptureStorage {
       }
       return stack;
     }
-    return exceptionStack;
+    return current;
   }
 
   private static class StackData {
@@ -424,6 +724,15 @@ public final class CaptureStorage {
 
     StackData collectStacks(List<StackTraceElement> stackTrace) {
       return new StackData(stackTrace, null);
+    }
+
+    @Override
+    public String toString() {
+      StringBuilder sb = new StringBuilder();
+      for (StackTraceElement se: getStackTrace()) {
+        sb.append(se).append("\n");
+      }
+      return "current_stack:[ + " + sb.toString() + "\n]";
     }
   }
 
@@ -516,11 +825,11 @@ public final class CaptureStorage {
    */
   @SuppressWarnings("unused")
   public static String getCapturedStackForThread(int limit, Thread thread) {
-    Deque<CapturedStack> capturedStacks = storeAsyncStackTracesForAllThreads
+    Deque<CurrentStackFrame> capturedStacks = storeAsyncStackTracesForAllThreads
             ? THREAD_TO_STACKS_MAP.get(thread)
             : (thread == Thread.currentThread() ? CURRENT_STACKS.get() : null);
     if (capturedStacks == null) return null;
-    return wrapInString(capturedStacks.peekLast(), limit);
+    return wrapInString(peekCurrentStack(capturedStacks), limit);
   }
 
   /**
@@ -534,16 +843,16 @@ public final class CaptureStorage {
   public static Map<Thread, String> getAllCapturedStacks(int limit) {
     HashMap<Thread, String> threadToStacks = new HashMap<>();
     if (storeAsyncStackTracesForAllThreads) {
-      for (Map.Entry<ConcurrentIdentityWeakHashMap.Key<Thread>, Deque<CapturedStack>> entry : THREAD_TO_STACKS_MAP.map.entrySet()) {
+      for (Map.Entry<ConcurrentIdentityWeakHashMap.Key<Thread>, Deque<CurrentStackFrame>> entry : THREAD_TO_STACKS_MAP.map.entrySet()) {
         Thread thread = entry.getKey().get();
-        if (entry.getValue() == null || entry.getValue().isEmpty() || !thread.isAlive()) continue;
-        String capturedStack = wrapInString(entry.getValue().peekLast(), limit);
+        if (entry.getValue() == null || entry.getValue().isEmpty() || thread == null || !thread.isAlive()) continue;
+        String capturedStack = wrapInString(peekCurrentStack(entry.getValue()), limit);
         threadToStacks.put(thread, capturedStack);
       }
     } else {
-      Deque<CapturedStack> capturedStacks = CURRENT_STACKS.get();
+      Deque<CurrentStackFrame> capturedStacks = CURRENT_STACKS.get();
       if (capturedStacks != null) {
-        threadToStacks.put(Thread.currentThread(), wrapInString(capturedStacks.peekLast(), limit));
+        threadToStacks.put(Thread.currentThread(), wrapInString(peekCurrentStack(capturedStacks), limit));
       }
     }
     return threadToStacks;
@@ -673,6 +982,11 @@ public final class CaptureStorage {
     } catch (RuntimeException ignored) {
     }
     return res;
+  }
+
+  private static String getIndexedKeyText(Object owner, Object index) {
+    String indexText = index == NULL_INDEX ? "null" : String.valueOf(index);
+    return getKeyText(owner) + "[" + indexText + "]";
   }
 
   private static class ThrottledCapturedStack extends CapturedStack {

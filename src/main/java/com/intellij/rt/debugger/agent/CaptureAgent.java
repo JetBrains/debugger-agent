@@ -175,10 +175,21 @@ public final class CaptureAgent {
           if (point.matchesMethod(name, desc)) {
             final String methodDisplayName = getMethodDisplayName(point.myClassName, name, desc);
             if (CaptureStorage.DEBUG) {
+              String pointType = point.isStorageCall() ? "storage" : point.myCapture ? "capture" : "insert";
               System.out.println(
-                "Capture agent: instrumented " + (point.myCapture ? "capture" : "insert") + " point at " + methodDisplayName);
+                "Capture agent: instrumented " + pointType + " point at " + methodDisplayName);
             }
-            if (point.myCapture) { // capture
+            if (point.isStorageCall()) {
+              return new MethodVisitor(api, super.visitMethod(access, name, desc, signature, exceptions)) {
+                @Override
+                public void visitCode() {
+                  storageCall(mv, point.myStorageArgumentsProvider, (access & Opcodes.ACC_STATIC) != 0,
+                              Type.getMethodType(desc).getArgumentTypes(), point.myStorageMethodName, methodDisplayName);
+                  super.visitCode();
+                }
+              };
+            }
+            else if (point.myCapture) { // capture
               // for constructors and "this" key - move capture to after the super constructor call
               if (CONSTRUCTOR.equals(name) && point.myKeyProvider == THIS_KEY_PROVIDER) {
                 return new MethodVisitor(api, super.visitMethod(access, name, desc, signature, exceptions)) {
@@ -191,8 +202,7 @@ public final class CaptureAgent {
                         !captured &&
                         owner.equals(mySuperName) &&
                         name.equals(CONSTRUCTOR)) { // super constructor
-                      capture(mv, point.myKeyProvider, (access & Opcodes.ACC_STATIC) != 0,
-                              Type.getMethodType(desc).getArgumentTypes(), methodDisplayName);
+                      capture(mv, point, (access & Opcodes.ACC_STATIC) != 0, Type.getMethodType(desc).getArgumentTypes(), methodDisplayName);
                       captured = true;
                     }
                   }
@@ -202,7 +212,7 @@ public final class CaptureAgent {
                 return new MethodVisitor(api, super.visitMethod(access, name, desc, signature, exceptions)) {
                   @Override
                   public void visitCode() {
-                    capture(mv, point.myKeyProvider, (access & Opcodes.ACC_STATIC) != 0, Type.getMethodType(desc).getArgumentTypes(),
+                    capture(mv, point, (access & Opcodes.ACC_STATIC) != 0, Type.getMethodType(desc).getArgumentTypes(),
                             methodDisplayName);
                     super.visitCode();
                   }
@@ -236,8 +246,9 @@ public final class CaptureAgent {
 
       boolean isStatic = (access & Opcodes.ACC_STATIC) != 0;
       Type[] argumentTypes = Type.getMethodType(desc).getArgumentTypes();
+      boolean hasInsertExit = insertPoint.hasInsertExit();
 
-      insertEnter(mv, insertPoint.myKeyProvider, isStatic, argumentTypes, methodDisplayName);
+      insertEnter(mv, insertPoint, isStatic, argumentTypes, methodDisplayName);
 
       // this
       mv.visitVarInsn(Opcodes.ALOAD, 0);
@@ -254,44 +265,63 @@ public final class CaptureAgent {
       Label end = new Label();
       mv.visitLabel(end);
 
-      // regular exit
-      insertExit(mv, insertPoint.myKeyProvider, isStatic, argumentTypes, methodDisplayName);
+      if (hasInsertExit) {
+        // regular exit
+        insertExit(mv, insertPoint, isStatic, argumentTypes, methodDisplayName);
+      }
       mv.visitInsn(Type.getReturnType(desc).getOpcode(Opcodes.IRETURN));
 
-      Label catchLabel = new Label();
-      mv.visitLabel(catchLabel);
-      mv.visitTryCatchBlock(start, end, catchLabel, null);
+      if (hasInsertExit) {
+        Label catchLabel = new Label();
+        mv.visitLabel(catchLabel);
+        mv.visitTryCatchBlock(start, end, catchLabel, null);
 
-      // exception exit
-      insertExit(mv, insertPoint.myKeyProvider, isStatic, argumentTypes, methodDisplayName);
-      mv.visitInsn(Opcodes.ATHROW);
+        // exception exit
+        insertExit(mv, insertPoint, isStatic, argumentTypes, methodDisplayName);
+        mv.visitInsn(Opcodes.ATHROW);
+      }
 
       mv.visitMaxs(0, 0);
       mv.visitEnd();
     }
 
     private void capture(MethodVisitor mv,
-                         KeyProvider keyProvider,
+                         InstrumentPoint point,
                          boolean isStatic,
                          Type[] argumentTypes,
                          String methodDisplayName) {
-      storageCall(mv, keyProvider, isStatic, argumentTypes, "capture", methodDisplayName);
+      storageCall(mv, point, isStatic, argumentTypes, "capture", point.myStorageMethodName, methodDisplayName);
     }
 
     private void insertEnter(MethodVisitor mv,
-                             KeyProvider keyProvider,
+                             InstrumentPoint point,
                              boolean isStatic,
                              Type[] argumentTypes,
                              String methodDisplayName) {
-      storageCall(mv, keyProvider, isStatic, argumentTypes, "insertEnter", methodDisplayName);
+      storageCall(mv, point, isStatic, argumentTypes, "insertEnter", point.myStorageMethodName, methodDisplayName);
     }
 
     private void insertExit(MethodVisitor mv,
-                            KeyProvider keyProvider,
+                            InstrumentPoint point,
                             boolean isStatic,
                             Type[] argumentTypes,
                             String methodDisplayName) {
-      storageCall(mv, keyProvider, isStatic, argumentTypes, "insertExit", methodDisplayName);
+      storageCall(mv, point, isStatic, argumentTypes, "insertExit", point.myStorageExitMethodName, methodDisplayName);
+    }
+
+    private void storageCall(MethodVisitor mv,
+                             InstrumentPoint point,
+                             boolean isStatic,
+                             Type[] argumentTypes,
+                             String defaultStorageMethodName,
+                             String storageMethodName,
+                             String methodDisplayName) {
+      if (point.myStorageArgumentsProvider == null) {
+        storageCall(mv, point.myKeyProvider, isStatic, argumentTypes, defaultStorageMethodName, methodDisplayName);
+      }
+      else {
+        storageCall(mv, point.myStorageArgumentsProvider, isStatic, argumentTypes, storageMethodName, methodDisplayName);
+      }
     }
 
     private void storageCall(MethodVisitor mv,
@@ -301,6 +331,16 @@ public final class CaptureAgent {
                              String storageMethodName,
                              String methodDisplayName) {
       keyProvider.loadKey(mv, isStatic, argumentTypes, methodDisplayName, this);
+      invokeStorageMethod(mv, storageMethodName);
+    }
+
+    private void storageCall(MethodVisitor mv,
+                             StorageArgumentsProvider argumentsProvider,
+                             boolean isStatic,
+                             Type[] argumentTypes,
+                             String storageMethodName,
+                             String methodDisplayName) {
+      argumentsProvider.loadArguments(mv, isStatic, argumentTypes, methodDisplayName, this);
       invokeStorageMethod(mv, storageMethodName);
     }
   }
@@ -334,6 +374,10 @@ public final class CaptureAgent {
     final String myMethodName;
     final String myMethodDesc;
     final KeyProvider myKeyProvider;
+    final String myStorageMethodName;
+    final String myStorageExitMethodName;
+    final StorageArgumentsProvider myStorageArgumentsProvider;
+    final boolean myDirectStorageCall;
 
     InstrumentPoint(boolean capture, String className, String methodName, String methodDesc, KeyProvider keyProvider) {
       myCapture = capture;
@@ -341,6 +385,44 @@ public final class CaptureAgent {
       myMethodName = methodName;
       myMethodDesc = methodDesc;
       myKeyProvider = keyProvider;
+      myStorageMethodName = null;
+      myStorageExitMethodName = null;
+      myStorageArgumentsProvider = null;
+      myDirectStorageCall = false;
+    }
+
+    InstrumentPoint(boolean capture,
+                    String className,
+                    String methodName,
+                    String methodDesc,
+                    String storageMethodName,
+                    String storageExitMethodName,
+                    StorageArgumentsProvider storageArgumentsProvider) {
+      myCapture = capture;
+      myClassName = className;
+      myMethodName = methodName;
+      myMethodDesc = methodDesc;
+      myKeyProvider = null;
+      myStorageMethodName = storageMethodName;
+      myStorageExitMethodName = storageExitMethodName;
+      myStorageArgumentsProvider = storageArgumentsProvider;
+      myDirectStorageCall = false;
+    }
+
+    InstrumentPoint(String className,
+                    String methodName,
+                    String methodDesc,
+                    String storageMethodName,
+                    StorageArgumentsProvider storageArgumentsProvider) {
+      myCapture = true;
+      myClassName = className;
+      myMethodName = methodName;
+      myMethodDesc = methodDesc;
+      myKeyProvider = null;
+      myStorageMethodName = storageMethodName;
+      myStorageExitMethodName = null;
+      myStorageArgumentsProvider = storageArgumentsProvider;
+      myDirectStorageCall = true;
     }
 
     boolean matchesMethod(String name, String desc) {
@@ -348,6 +430,14 @@ public final class CaptureAgent {
         return false;
       }
       return myMethodDesc.equals(ANY_DESC) || myMethodDesc.equals(desc);
+    }
+
+    boolean isStorageCall() {
+      return myDirectStorageCall;
+    }
+
+    boolean hasInsertExit() {
+      return myStorageArgumentsProvider == null || myStorageExitMethodName != null;
     }
   }
 
@@ -459,6 +549,10 @@ public final class CaptureAgent {
     void loadKey(MethodVisitor mv, boolean isStatic, Type[] argumentTypes, String methodDisplayName, CaptureInstrumentor instrumentor);
   }
 
+  private interface StorageArgumentsProvider {
+    void loadArguments(MethodVisitor mv, boolean isStatic, Type[] argumentTypes, String methodDisplayName, CaptureInstrumentor instrumentor);
+  }
+
   private static class FieldKeyProvider implements KeyProvider {
     private final String myClassName;
     private final String myFieldName;
@@ -525,16 +619,118 @@ public final class CaptureAgent {
     }
   }
 
+  private static class MethodArgumentsProvider implements StorageArgumentsProvider {
+    private final int[] myIndexes;
+
+    MethodArgumentsProvider(int[] indexes) {
+      myIndexes = indexes;
+    }
+
+    @Override
+    public void loadArguments(MethodVisitor mv,
+                              boolean isStatic,
+                              Type[] argumentTypes,
+                              String methodDisplayName,
+                              CaptureInstrumentor instrumentor) {
+      for (int index : myIndexes) {
+        if (index >= argumentTypes.length) {
+          throw new IllegalStateException(
+            "Argument with id " + index + " is not available, method " + methodDisplayName + " has only " + argumentTypes.length);
+        }
+        Type type = argumentTypes[index];
+        mv.visitVarInsn(type.getOpcode(Opcodes.ILOAD), getLocalVariableIndex(isStatic, argumentTypes, index));
+      }
+    }
+  }
+
   private static void addCapture(String className, String methodName, KeyProvider key) {
     addCapturePoint(true, className, methodName, InstrumentPoint.ANY_DESC, key);
+  }
+
+  private static void addCapture(String className,
+                                 String methodName,
+                                 String methodDesc,
+                                 String storageMethodName,
+                                 StorageArgumentsProvider argumentsProvider) {
+    addCapturePoint(true, className, methodName, methodDesc, storageMethodName, null, argumentsProvider);
   }
 
   private static void addInsert(String className, String methodName, KeyProvider key) {
     addCapturePoint(false, className, methodName, InstrumentPoint.ANY_DESC, key);
   }
 
+  private static void addInsert(String className,
+                                String methodName,
+                                String methodDesc,
+                                String storageEnterMethodName,
+                                String storageExitMethodName,
+                                StorageArgumentsProvider argumentsProvider) {
+    addCapturePoint(false, className, methodName, methodDesc, storageEnterMethodName, storageExitMethodName, argumentsProvider);
+  }
+
+  private static void addInsert(String className,
+                                String methodName,
+                                String methodDesc,
+                                String storageEnterMethodName,
+                                StorageArgumentsProvider argumentsProvider) {
+    addCapturePoint(false, className, methodName, methodDesc, storageEnterMethodName, null, argumentsProvider);
+  }
+
+  private static void addStorageCall(String className,
+                                     String methodName,
+                                     String methodDesc,
+                                     String storageMethodName,
+                                     StorageArgumentsProvider argumentsProvider) {
+    addStorageCallPoint(className, methodName, methodDesc, storageMethodName, argumentsProvider);
+  }
+
   private static KeyProvider param(int idx) {
     return new ParamKeyProvider(idx);
+  }
+
+  private static StorageArgumentsProvider params(int... indexes) {
+    return new MethodArgumentsProvider(indexes);
+  }
+
+  private static InstrumentPoint addStorageCallPoint(String className,
+                                                     String methodName,
+                                                     String methodDesc,
+                                                     String storageMethodName,
+                                                     StorageArgumentsProvider argumentsProvider) {
+    List<InstrumentPoint> points = myInstrumentPoints.get(className);
+    if (points == null) {
+      points = new ArrayList<>(1);
+      myInstrumentPoints.put(className, points);
+    }
+    InstrumentPoint point = new InstrumentPoint(className, methodName, methodDesc, storageMethodName, argumentsProvider);
+    points.add(point);
+    return point;
+  }
+
+  private static InstrumentPoint addCapturePoint(boolean capture,
+                                                 String className,
+                                                 String methodName,
+                                                 String methodDesc,
+                                                 String storageMethodName,
+                                                 String storageExitMethodName,
+                                                 StorageArgumentsProvider argumentsProvider) {
+    List<InstrumentPoint> points = myInstrumentPoints.get(className);
+    if (points == null) {
+      points = new ArrayList<>(1);
+      myInstrumentPoints.put(className, points);
+    }
+    InstrumentPoint point = new InstrumentPoint(capture, className, methodName, methodDesc,
+                                                storageMethodName, storageExitMethodName, argumentsProvider);
+    points.add(point);
+    return point;
+  }
+
+  private static int getLocalVariableIndex(boolean isStatic, Type[] argumentTypes, int argumentIndex) {
+    int index = isStatic ? 0 : 1;
+    for (int i = 0; i < argumentIndex; i++) {
+      index += argumentTypes[i].getSize();
+    }
+    return index;
   }
 
   public static final String CONSTRUCTOR = "<init>";
@@ -613,6 +809,27 @@ public final class CaptureAgent {
 
         addInsert("kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt", "emitInternal", param(1));
         addInsert("kotlinx/coroutines/flow/internal/FlowValueWrapperInternalKt", "debuggerCapture", FIRST_PARAM);
+
+        String debuggerWrappers = "kotlinx/coroutines/internal/DebuggerWrappersKt";
+        String sharedFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/SharedFlow;J)Ljava/lang/Object;";
+        addCapture(debuggerWrappers, "collectStacktrace", sharedFlowStacktraceDesc, "captureSharedFlowStacktrace", params(0, 1));
+        addInsert(debuggerWrappers, "matchStacktrace", sharedFlowStacktraceDesc, "insertEnterSharedFlowStacktrace", params(0, 1));
+
+        String channelStacktraceDesc =
+                "(Lkotlinx/coroutines/channels/Channel;Lkotlinx/coroutines/channels/ChannelSegment;I)Ljava/lang/Object;";
+        addCapture(debuggerWrappers, "collectStacktrace", channelStacktraceDesc, "captureChannelStacktrace", params(1, 2));
+        addInsert(debuggerWrappers, "matchStacktrace", channelStacktraceDesc, "insertEnterChannelStacktrace", params(1, 2));
+
+        String channelSegmentStacktraceDesc =
+                "(Lkotlinx/coroutines/channels/ChannelSegment;J)Ljava/lang/Object;";
+        addCapture(debuggerWrappers, "collectStacktrace", channelSegmentStacktraceDesc, "captureChannelSegmentStacktrace", params(0, 1));
+        addInsert(debuggerWrappers, "matchStacktrace", channelSegmentStacktraceDesc, "insertEnterChannelSegmentStacktrace", params(0, 1));
+
+        if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.mutable.state.flows.stack.trace")) {
+          String stateFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/StateFlow;Ljava/lang/Object;)Ljava/lang/Object;";
+          addCapture(debuggerWrappers, "collectStacktrace", stateFlowStacktraceDesc, "captureStateFlowStacktrace", params(0, 1));
+          addInsert(debuggerWrappers, "matchStacktrace", stateFlowStacktraceDesc, "insertEnterStateFlowStacktrace", params(0, 1));
+        }
       }
     }
   }
