@@ -244,7 +244,7 @@ public class InstrumentationBreakpointTransformer {
                                     mv.visitLabel(startTry);
 
                                     for (ArgumentGetter argumentLoadGenerator : argumentMapping.argumentLoadGenerators) {
-                                        argumentLoadGenerator.generateArgumentLoad(mv);
+                                        argumentLoadGenerator.generateArgumentLoad(this);
                                     }
 
                                     mv.visitMethodInsn(Opcodes.INVOKESTATIC,
