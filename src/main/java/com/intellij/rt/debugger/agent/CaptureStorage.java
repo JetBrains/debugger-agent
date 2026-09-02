@@ -216,16 +216,6 @@ public final class CaptureStorage {
     insertEnterIndexedStack(segment, Integer.valueOf(index));
   }
 
-  @SuppressWarnings("unused")
-  public static void captureChannelSegmentStacktrace(final Object segment, final long index) {
-    captureIndexedStack(segment, Long.valueOf(index));
-  }
-
-  @SuppressWarnings("unused")
-  public static void insertEnterChannelSegmentStacktrace(final Object segment, final long index) {
-    insertEnterIndexedStack(segment, Long.valueOf(index));
-  }
-
   private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> COROUTINE_GET_CALLER_FRAME_METHODS = new ConcurrentIdentityWeakHashMap<>();
 
   @SuppressWarnings("unused")

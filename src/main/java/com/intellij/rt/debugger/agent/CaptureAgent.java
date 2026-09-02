@@ -175,21 +175,11 @@ public final class CaptureAgent {
           if (point.matchesMethod(name, desc)) {
             final String methodDisplayName = getMethodDisplayName(point.myClassName, name, desc);
             if (CaptureStorage.DEBUG) {
-              String pointType = point.isStorageCall() ? "storage" : point.myCapture ? "capture" : "insert";
+              String pointType = point.myCapture ? "capture" : "insert";
               System.out.println(
                 "Capture agent: instrumented " + pointType + " point at " + methodDisplayName);
             }
-            if (point.isStorageCall()) {
-              return new MethodVisitor(api, super.visitMethod(access, name, desc, signature, exceptions)) {
-                @Override
-                public void visitCode() {
-                  storageCall(mv, point.myStorageArgumentsProvider, (access & Opcodes.ACC_STATIC) != 0,
-                              Type.getMethodType(desc).getArgumentTypes(), point.myStorageMethodName, methodDisplayName);
-                  super.visitCode();
-                }
-              };
-            }
-            else if (point.myCapture) { // capture
+            if (point.myCapture) { // capture
               // for constructors and "this" key - move capture to after the super constructor call
               if (CONSTRUCTOR.equals(name) && point.myKeyProvider == THIS_KEY_PROVIDER) {
                 return new MethodVisitor(api, super.visitMethod(access, name, desc, signature, exceptions)) {
@@ -306,7 +296,7 @@ public final class CaptureAgent {
                             boolean isStatic,
                             Type[] argumentTypes,
                             String methodDisplayName) {
-      storageCall(mv, point, isStatic, argumentTypes, "insertExit", point.myStorageExitMethodName, methodDisplayName);
+      storageCall(mv, point.myKeyProvider, isStatic, argumentTypes, "insertExit", methodDisplayName);
     }
 
     private void storageCall(MethodVisitor mv,
@@ -375,9 +365,7 @@ public final class CaptureAgent {
     final String myMethodDesc;
     final KeyProvider myKeyProvider;
     final String myStorageMethodName;
-    final String myStorageExitMethodName;
     final StorageArgumentsProvider myStorageArgumentsProvider;
-    final boolean myDirectStorageCall;
 
     InstrumentPoint(boolean capture, String className, String methodName, String methodDesc, KeyProvider keyProvider) {
       myCapture = capture;
@@ -386,9 +374,7 @@ public final class CaptureAgent {
       myMethodDesc = methodDesc;
       myKeyProvider = keyProvider;
       myStorageMethodName = null;
-      myStorageExitMethodName = null;
       myStorageArgumentsProvider = null;
-      myDirectStorageCall = false;
     }
 
     InstrumentPoint(boolean capture,
@@ -396,7 +382,6 @@ public final class CaptureAgent {
                     String methodName,
                     String methodDesc,
                     String storageMethodName,
-                    String storageExitMethodName,
                     StorageArgumentsProvider storageArgumentsProvider) {
       myCapture = capture;
       myClassName = className;
@@ -404,25 +389,7 @@ public final class CaptureAgent {
       myMethodDesc = methodDesc;
       myKeyProvider = null;
       myStorageMethodName = storageMethodName;
-      myStorageExitMethodName = storageExitMethodName;
       myStorageArgumentsProvider = storageArgumentsProvider;
-      myDirectStorageCall = false;
-    }
-
-    InstrumentPoint(String className,
-                    String methodName,
-                    String methodDesc,
-                    String storageMethodName,
-                    StorageArgumentsProvider storageArgumentsProvider) {
-      myCapture = true;
-      myClassName = className;
-      myMethodName = methodName;
-      myMethodDesc = methodDesc;
-      myKeyProvider = null;
-      myStorageMethodName = storageMethodName;
-      myStorageExitMethodName = null;
-      myStorageArgumentsProvider = storageArgumentsProvider;
-      myDirectStorageCall = true;
     }
 
     boolean matchesMethod(String name, String desc) {
@@ -432,12 +399,8 @@ public final class CaptureAgent {
       return myMethodDesc.equals(ANY_DESC) || myMethodDesc.equals(desc);
     }
 
-    boolean isStorageCall() {
-      return myDirectStorageCall;
-    }
-
     boolean hasInsertExit() {
-      return myStorageArgumentsProvider == null || myStorageExitMethodName != null;
+      return myStorageArgumentsProvider == null;
     }
   }
 
@@ -652,7 +615,7 @@ public final class CaptureAgent {
                                  String methodDesc,
                                  String storageMethodName,
                                  StorageArgumentsProvider argumentsProvider) {
-    addCapturePoint(true, className, methodName, methodDesc, storageMethodName, null, argumentsProvider);
+    addCapturePoint(true, className, methodName, methodDesc, storageMethodName, argumentsProvider);
   }
 
   private static void addInsert(String className, String methodName, KeyProvider key) {
@@ -663,25 +626,8 @@ public final class CaptureAgent {
                                 String methodName,
                                 String methodDesc,
                                 String storageEnterMethodName,
-                                String storageExitMethodName,
                                 StorageArgumentsProvider argumentsProvider) {
-    addCapturePoint(false, className, methodName, methodDesc, storageEnterMethodName, storageExitMethodName, argumentsProvider);
-  }
-
-  private static void addInsert(String className,
-                                String methodName,
-                                String methodDesc,
-                                String storageEnterMethodName,
-                                StorageArgumentsProvider argumentsProvider) {
-    addCapturePoint(false, className, methodName, methodDesc, storageEnterMethodName, null, argumentsProvider);
-  }
-
-  private static void addStorageCall(String className,
-                                     String methodName,
-                                     String methodDesc,
-                                     String storageMethodName,
-                                     StorageArgumentsProvider argumentsProvider) {
-    addStorageCallPoint(className, methodName, methodDesc, storageMethodName, argumentsProvider);
+    addCapturePoint(false, className, methodName, methodDesc, storageEnterMethodName, argumentsProvider);
   }
 
   private static KeyProvider param(int idx) {
@@ -692,27 +638,11 @@ public final class CaptureAgent {
     return new MethodArgumentsProvider(indexes);
   }
 
-  private static InstrumentPoint addStorageCallPoint(String className,
-                                                     String methodName,
-                                                     String methodDesc,
-                                                     String storageMethodName,
-                                                     StorageArgumentsProvider argumentsProvider) {
-    List<InstrumentPoint> points = myInstrumentPoints.get(className);
-    if (points == null) {
-      points = new ArrayList<>(1);
-      myInstrumentPoints.put(className, points);
-    }
-    InstrumentPoint point = new InstrumentPoint(className, methodName, methodDesc, storageMethodName, argumentsProvider);
-    points.add(point);
-    return point;
-  }
-
   private static InstrumentPoint addCapturePoint(boolean capture,
                                                  String className,
                                                  String methodName,
                                                  String methodDesc,
                                                  String storageMethodName,
-                                                 String storageExitMethodName,
                                                  StorageArgumentsProvider argumentsProvider) {
     List<InstrumentPoint> points = myInstrumentPoints.get(className);
     if (points == null) {
@@ -720,7 +650,7 @@ public final class CaptureAgent {
       myInstrumentPoints.put(className, points);
     }
     InstrumentPoint point = new InstrumentPoint(capture, className, methodName, methodDesc,
-                                                storageMethodName, storageExitMethodName, argumentsProvider);
+                                                storageMethodName, argumentsProvider);
     points.add(point);
     return point;
   }
@@ -819,11 +749,6 @@ public final class CaptureAgent {
                 "(Lkotlinx/coroutines/channels/Channel;Lkotlinx/coroutines/channels/ChannelSegment;I)Ljava/lang/Object;";
         addCapture(debuggerWrappers, "collectStacktrace", channelStacktraceDesc, "captureChannelStacktrace", params(1, 2));
         addInsert(debuggerWrappers, "matchStacktrace", channelStacktraceDesc, "insertEnterChannelStacktrace", params(1, 2));
-
-        String channelSegmentStacktraceDesc =
-                "(Lkotlinx/coroutines/channels/ChannelSegment;J)Ljava/lang/Object;";
-        addCapture(debuggerWrappers, "collectStacktrace", channelSegmentStacktraceDesc, "captureChannelSegmentStacktrace", params(0, 1));
-        addInsert(debuggerWrappers, "matchStacktrace", channelSegmentStacktraceDesc, "insertEnterChannelSegmentStacktrace", params(0, 1));
 
         if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.mutable.state.flows.stack.trace")) {
           String stateFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/StateFlow;Ljava/lang/Object;)Ljava/lang/Object;";

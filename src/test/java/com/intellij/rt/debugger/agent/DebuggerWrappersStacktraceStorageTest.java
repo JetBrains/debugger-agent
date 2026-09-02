@@ -181,18 +181,6 @@ public class DebuggerWrappersStacktraceStorageTest {
         assertEquals(1, CaptureStorage.getCurrentStackFrameCountForTests());
     }
 
-    @Test
-    public void channelSegmentHooksSupportLongIndex() {
-        Object segment = new Object();
-
-        CaptureStorage.captureChannelSegmentStacktrace(segment, 7L);
-        CaptureStorage.insertEnterChannelSegmentStacktrace(segment, 7L);
-        CaptureStorage.CapturedStack currentStack = CaptureStorage.getCurrentCapturedStack();
-        assertNotNull(currentStack);
-        assertEquals(stack(segment, Long.valueOf(7L)), CaptureStorage.getCapturedStackTrace(currentStack, 1000));
-        assertEquals(1, CaptureStorage.getCurrentStackFrameCountForTests());
-    }
-
     private static List<StackTraceElement> stack(Object owner, Object index) {
         return CaptureStorage.getIndexedStackTraceForTests(owner, index, 1000);
     }
