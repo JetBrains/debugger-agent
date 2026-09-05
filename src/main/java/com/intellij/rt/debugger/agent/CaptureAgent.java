@@ -743,16 +743,18 @@ public final class CaptureAgent {
         String debuggerWrappers = "kotlinx/coroutines/internal/DebuggerWrappersKt";
         String sharedFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/SharedFlow;J)Ljava/lang/Object;";
         addCapture(debuggerWrappers, "collectStacktrace", sharedFlowStacktraceDesc, "captureSharedFlowStacktrace", params(0, 1));
+        addCapture(debuggerWrappers, "dropStacktrace", sharedFlowStacktraceDesc, "dropSharedFlowStacktrace", params(0, 1));
         addInsert(debuggerWrappers, "matchStacktrace", sharedFlowStacktraceDesc, "insertEnterSharedFlowStacktrace", params(0, 1));
 
         String channelStacktraceDesc =
                 "(Lkotlinx/coroutines/channels/Channel;Lkotlinx/coroutines/channels/ChannelSegment;I)Ljava/lang/Object;";
-        addCapture(debuggerWrappers, "collectStacktrace", channelStacktraceDesc, "captureChannelStacktrace", params(1, 2));
-        addInsert(debuggerWrappers, "matchStacktrace", channelStacktraceDesc, "insertEnterChannelStacktrace", params(1, 2));
+        addCapture(debuggerWrappers, "collectStacktrace", channelStacktraceDesc, "captureChannelStacktrace", params(0, 1, 2));
+        addInsert(debuggerWrappers, "matchStacktrace", channelStacktraceDesc, "insertEnterChannelStacktrace", params(0, 1, 2));
 
         if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.mutable.state.flows.stack.trace")) {
           String stateFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/StateFlow;Ljava/lang/Object;)Ljava/lang/Object;";
           addCapture(debuggerWrappers, "collectStacktrace", stateFlowStacktraceDesc, "captureStateFlowStacktrace", params(0, 1));
+          addCapture(debuggerWrappers, "dropStacktrace", stateFlowStacktraceDesc, "dropStateFlowStacktrace", params(0, 1));
           addInsert(debuggerWrappers, "matchStacktrace", stateFlowStacktraceDesc, "insertEnterStateFlowStacktrace", params(0, 1));
         }
       }

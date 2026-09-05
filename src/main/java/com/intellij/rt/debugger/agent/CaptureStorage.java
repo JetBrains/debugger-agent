@@ -4,6 +4,7 @@ package com.intellij.rt.debugger.agent;
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Method;
@@ -17,6 +18,8 @@ public final class CaptureStorage {
   private static final ConcurrentIdentityWeakHashMap<Object, CapturedStack> STORAGE_GENERAL = new ConcurrentIdentityWeakHashMap<>();
   private static final ConcurrentIdentityWeakHashMap<Throwable, CapturedStack> STORAGE_THROWABLES = new ConcurrentIdentityWeakHashMap<>();
   private static final ConcurrentIdentityWeakHashMap<Object, ConcurrentMap<Object, CapturedStack>> STORAGE_INDEXED =
+          new ConcurrentIdentityWeakHashMap<>();
+  private static final ConcurrentIdentityWeakHashMap<Object, ConcurrentMap<Object, DeferredCapturedStack>> PENDING_INDEXED_MATCHES =
           new ConcurrentIdentityWeakHashMap<>();
   private static final Object NULL_INDEX = new Object();
 
@@ -151,12 +154,12 @@ public final class CaptureStorage {
       public void run() {
         try {
           CapturedStack stack = STORAGE_GENERAL.get(key);
-          logStorageEvent("insertEnter",
-                  "before stack is pushed " + getCallerDescriptorForLogging() + " -> " + getKeyText(key),
-                  stack);
+//          logStorageEvent("insertEnter",
+//                  "before stack is pushed " + getCallerDescriptorForLogging() + " -> " + getKeyText(key),
+//                  stack);
           pushCurrentStack(stack);
-          logStorageEvent("insertEnter",
-                  "after stack is pushed " + getCallerDescriptorForLogging() + " -> " + getKeyText(key));
+//          logStorageEvent("insertEnter",
+//                  "after stack is pushed " + getCallerDescriptorForLogging() + " -> " + getKeyText(key));
         }
         catch (Exception e) {
           handleException(e);
@@ -192,6 +195,11 @@ public final class CaptureStorage {
   }
 
   @SuppressWarnings("unused")
+  public static void dropSharedFlowStacktrace(final Object sharedFlow, final long index) {
+    dropIndexedStack(sharedFlow, Long.valueOf(index));
+  }
+
+  @SuppressWarnings("unused")
   public static void insertEnterSharedFlowStacktrace(final Object sharedFlow, final long index) {
     insertEnterIndexedStack(sharedFlow, Long.valueOf(index));
   }
@@ -202,18 +210,23 @@ public final class CaptureStorage {
   }
 
   @SuppressWarnings("unused")
+  public static void dropStateFlowStacktrace(final Object stateFlow, final Object state) {
+    dropIndexedStack(stateFlow, state);
+  }
+
+  @SuppressWarnings("unused")
   public static void insertEnterStateFlowStacktrace(final Object stateFlow, final Object state) {
     insertEnterIndexedStack(stateFlow, state);
   }
 
   @SuppressWarnings("unused")
-  public static void captureChannelStacktrace(final Object segment, final int index) {
-    captureIndexedStack(segment, Integer.valueOf(index));
+  public static void captureChannelStacktrace(final Object channel, final Object segment, final int index) {
+    captureChannelIndexedStack(channel, segment, Integer.valueOf(index));
   }
 
   @SuppressWarnings("unused")
-  public static void insertEnterChannelStacktrace(final Object segment, final int index) {
-    insertEnterIndexedStack(segment, Integer.valueOf(index));
+  public static void insertEnterChannelStacktrace(final Object channel, final Object segment, final int index) {
+    insertEnterChannelIndexedStack(channel, segment, Integer.valueOf(index));
   }
 
   private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> COROUTINE_GET_CALLER_FRAME_METHODS = new ConcurrentIdentityWeakHashMap<>();
@@ -301,29 +314,61 @@ public final class CaptureStorage {
     }, "captureIndexed");
   }
 
+  private static void captureChannelIndexedStack(final Object channel, final Object segment, final Object index) {
+    if (!ENABLED || segment == null) {
+      return;
+    }
+    final Object normalizedIndex = normalizeIndex(index);
+    final DeferredCapturedStack pendingMatch = getPendingIndexedStack(segment, normalizedIndex);
+    captureCurrentStack(new CapturedStackStore() {
+      @Override
+      public void put(CapturedStack stack) {
+        putIndexedStack(segment, normalizedIndex, stack);
+        completePendingIndexedStack(segment, normalizedIndex, stack);
+        bindChannelStackToWaitingReceiver(segment, normalizedIndex, stack);
+      }
+
+      @Override
+      public String getDescription() {
+        return getIndexedKeyText(segment, normalizedIndex) + " in " + getNullableKeyText(channel);
+      }
+    }, "captureChannelIndexed", pendingMatch);
+  }
+
   private static void captureCurrentStack(final CapturedStackStore store,
                                           final String debugPrefix) {
-    captureStack(store, debugPrefix);
+    captureCurrentStack(store, debugPrefix, null);
+  }
+
+  private static void captureCurrentStack(final CapturedStackStore store,
+                                          final String debugPrefix,
+                                          final CapturedStack ignoredCurrentStack) {
+    captureStack(store, debugPrefix, ignoredCurrentStack);
   }
 
   private static void captureStack(final CapturedStackStore store,
-                                   final String debugPrefix) {
+                                   final String debugPrefix,
+                                   final CapturedStack ignoredCurrentStack) {
     ThreadLocalContext context = CURRENT_CONTEXT.get();
     boolean executed = runWithOverheadTrackingAndWithoutThrowableCapture(context, new Runnable() {
       @Override
       public void run() {
         try {
-          CapturedStack previous = getCurrentCapturedStack();
-          logStorageEvent(debugPrefix,
-                  "previous captured stack before merging" + getCallerDescriptorForLogging() + " - " + store.getDescription() +
-                          ", previous current stack: " + getStackIdentity(previous),
-                  previous);
+          CapturedStack previous = getCurrentCapturedStackExcept(ignoredCurrentStack);
+          if (debugPrefix.contains("Indexed")) {
+            logStorageEvent(debugPrefix,
+                    "previous captured stack before merging" + getCallerDescriptorForLogging() + " - " + store.getDescription() +
+                            ", previous current stack: " + getStackIdentity(previous),
+                    previous);
+          }
           CapturedStack capturedStack = createCapturedStack(new Throwable(), previous);
           store.put(capturedStack);
-          logStorageEvent(debugPrefix,
-                          "after merging with current captured stack" + getCallerDescriptorForLogging() + " - " + store.getDescription() +
-                          ", previous current stack: " + getStackIdentity(previous),
-                          capturedStack);
+          if (debugPrefix.contains("Indexed")) {
+            logStorageEvent(debugPrefix,
+                    "after merging with current captured stack" + getCallerDescriptorForLogging() + " - " + store.getDescription() +
+                            ", previous current stack: " + getStackIdentity(previous),
+                    capturedStack);
+          }
         }
         // TODO: check whether it's ok to use assertions, and if we should catch Throwable everywhere
         catch (AssertionError | Exception e) {
@@ -343,6 +388,27 @@ public final class CaptureStorage {
                           ThrottledCapturedStack.INSTANCE);
         }
         catch (AssertionError | Exception e) {
+          handleException(e);
+        }
+      }
+    });
+  }
+
+  private static void dropIndexedStack(final Object owner, final Object index) {
+    if (!ENABLED || owner == null) {
+      return;
+    }
+    final Object normalizedIndex = normalizeIndex(index);
+    runWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
+      @Override
+      public void run() {
+        try {
+          removeIndexedStack(owner, normalizedIndex);
+          removePendingIndexedStack(owner, normalizedIndex);
+          logStorageEvent("dropIndexedStack",
+                          getCallerDescriptorForLogging() + " - " + getIndexedKeyText(owner, normalizedIndex));
+        }
+        catch (Exception e) {
           handleException(e);
         }
       }
@@ -375,6 +441,35 @@ public final class CaptureStorage {
     });
   }
 
+  private static void insertEnterChannelIndexedStack(final Object channel, final Object segment, final Object index) {
+    if (!ENABLED || segment == null) {
+      return;
+    }
+    final Object normalizedIndex = normalizeIndex(index);
+    runWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
+      @Override
+      public void run() {
+        try {
+          CapturedStack stack = getIndexedStack(segment, normalizedIndex);
+          if (stack == null) {
+            stack = getOrCreatePendingIndexedStack(segment, normalizedIndex);
+          }
+          logStorageEvent("insertEnterChannelIndexedStack",
+                          "before stack is saved " + getCallerDescriptorForLogging() + " -> " +
+                          getIndexedKeyText(segment, normalizedIndex) + " in " + getNullableKeyText(channel),
+                          stack);
+          int currentStackCount = pushCurrentIndexedStack(stack);
+          logStorageEvent("insertEnterChannelIndexedStack",
+                          getCallerDescriptorForLogging() + " -> " + getIndexedKeyText(segment, normalizedIndex) +
+                          " in " + getNullableKeyText(channel) + ", stack saved (" + currentStackCount + ")");
+        }
+        catch (Exception e) {
+          handleException(e);
+        }
+      }
+    });
+  }
+
   private static Object normalizeIndex(Object index) {
     return index == null ? NULL_INDEX : index;
   }
@@ -396,6 +491,213 @@ public final class CaptureStorage {
   private static CapturedStack getIndexedStack(Object owner, Object index) {
     ConcurrentMap<Object, CapturedStack> stacks = STORAGE_INDEXED.get(owner);
     return stacks == null ? null : stacks.get(index);
+  }
+
+  private static void removeIndexedStack(Object owner, Object index) {
+    ConcurrentMap<Object, CapturedStack> stacks = STORAGE_INDEXED.get(owner);
+    if (stacks != null) {
+      stacks.remove(index);
+    }
+  }
+
+  private static ConcurrentMap<Object, DeferredCapturedStack> getOrCreatePendingIndexedStacks(Object owner) {
+    ConcurrentMap<Object, DeferredCapturedStack> result = PENDING_INDEXED_MATCHES.get(owner);
+    if (result != null) {
+      return result;
+    }
+    ConcurrentMap<Object, DeferredCapturedStack> created = new ConcurrentHashMap<>();
+    ConcurrentMap<Object, DeferredCapturedStack> existing = PENDING_INDEXED_MATCHES.putIfAbsent(owner, created);
+    return existing == null ? created : existing;
+  }
+
+  private static DeferredCapturedStack getOrCreatePendingIndexedStack(Object owner, Object index) {
+    ConcurrentMap<Object, DeferredCapturedStack> stacks = getOrCreatePendingIndexedStacks(owner);
+    DeferredCapturedStack result = stacks.get(index);
+    if (result != null) {
+      return result;
+    }
+    DeferredCapturedStack created = new DeferredCapturedStack();
+    DeferredCapturedStack existing = stacks.putIfAbsent(index, created);
+    return existing == null ? created : existing;
+  }
+
+  private static DeferredCapturedStack getPendingIndexedStack(Object owner, Object index) {
+    ConcurrentMap<Object, DeferredCapturedStack> stacks = PENDING_INDEXED_MATCHES.get(owner);
+    return stacks == null ? null : stacks.get(index);
+  }
+
+  private static DeferredCapturedStack removePendingIndexedStack(Object owner, Object index) {
+    ConcurrentMap<Object, DeferredCapturedStack> stacks = PENDING_INDEXED_MATCHES.get(owner);
+    return stacks == null ? null : stacks.remove(index);
+  }
+
+  private static void completePendingIndexedStack(Object owner, Object index, CapturedStack stack) {
+    DeferredCapturedStack pending = removePendingIndexedStack(owner, index);
+    if (pending != null) {
+      pending.setStack(stack);
+    }
+  }
+
+  private static void bindChannelStackToWaitingReceiver(Object segment, Object index, CapturedStack stack) {
+    if (!(index instanceof Integer)) {
+      return;
+    }
+    Object waiter = getChannelCellState(segment, ((Integer)index).intValue());
+    Object continuation = getContinuationFromChannelWaiter(waiter);
+    if (continuation == null) {
+      return;
+    }
+    Object coroutineOwner = coroutineOwner(continuation);
+    STORAGE_GENERAL.put(coroutineOwner, stack);
+    logStorageEvent("bindChannelStackToWaitingReceiver",
+                    getIndexedKeyText(segment, index) + " -> " + getKeyText(coroutineOwner),
+                    stack);
+  }
+
+  private static Object getChannelCellState(Object segment, int index) {
+    try {
+      Method getState = findMethod(segment.getClass(), "getState", int.class);
+      if (getState == null) {
+        return null;
+      }
+      getState.setAccessible(true);
+      return getState.invoke(segment, Integer.valueOf(index));
+    }
+    catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static Object getContinuationFromChannelWaiter(Object waiter) {
+    Object unwrappedWaiter = unwrapChannelWaiter(waiter);
+    if (unwrappedWaiter == null) {
+      return null;
+    }
+    Object iteratorContinuation = asCoroutineStackFrame(getFieldValue(unwrappedWaiter, "continuation"));
+    if (iteratorContinuation != null) {
+      return iteratorContinuation;
+    }
+    Object receiveCatchingContinuation = asCoroutineStackFrame(getFieldValue(unwrappedWaiter, "cont"));
+    if (receiveCatchingContinuation != null) {
+      return receiveCatchingContinuation;
+    }
+    Object selectContinuation = getContinuationFromSelectWaiter(unwrappedWaiter);
+    if (selectContinuation != null) {
+      return selectContinuation;
+    }
+    return asCoroutineStackFrame(unwrappedWaiter);
+  }
+
+  private static Object getContinuationFromSelectWaiter(Object waiter) {
+    Object state = getFieldValue(waiter, "state");
+    Object continuation = asCoroutineStackFrame(state);
+    if (continuation != null) {
+      return continuation;
+    }
+
+    Object stateValue = getAtomicValue(state);
+    return asCoroutineStackFrame(stateValue);
+  }
+
+  private static Object getAtomicValue(Object atomicValue) {
+    if (atomicValue == null) {
+      return null;
+    }
+    Object value = getFieldValue(atomicValue, "value");
+    if (value != null) {
+      return value;
+    }
+    try {
+      Method getValue = findMethod(atomicValue.getClass(), "getValue");
+      if (getValue == null) {
+        return null;
+      }
+      getValue.setAccessible(true);
+      return getValue.invoke(atomicValue);
+    }
+    catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static Object unwrapChannelWaiter(Object waiter) {
+    Object result = waiter;
+    Object nested;
+    while ((nested = getFieldValue(result, "waiter")) != null && nested != result) {
+      result = nested;
+    }
+    return result;
+  }
+
+  private static Object getFieldValue(Object owner, String fieldName) {
+    if (owner == null) {
+      return null;
+    }
+    try {
+      Field field = findField(owner.getClass(), fieldName);
+      if (field == null) {
+        return null;
+      }
+      field.setAccessible(true);
+      return field.get(owner);
+    }
+    catch (Throwable ignored) {
+      return null;
+    }
+  }
+
+  private static Field findField(Class<?> ownerClass, String fieldName) {
+    Class<?> current = ownerClass;
+    while (current != null) {
+      try {
+        return current.getDeclaredField(fieldName);
+      }
+      catch (NoSuchFieldException ignored) {
+        current = current.getSuperclass();
+      }
+    }
+    return null;
+  }
+
+  private static Method findMethod(Class<?> ownerClass, String methodName, Class<?> parameterType) {
+    return findMethod(ownerClass, methodName, new Class<?>[]{parameterType});
+  }
+
+  private static Method findMethod(Class<?> ownerClass, String methodName) {
+    return findMethod(ownerClass, methodName, new Class<?>[0]);
+  }
+
+  private static Method findMethod(Class<?> ownerClass, String methodName, Class<?>[] parameterTypes) {
+    Class<?> current = ownerClass;
+    while (current != null) {
+      Method[] methods = current.getDeclaredMethods();
+      for (Method method : methods) {
+        Class<?>[] actualParameterTypes = method.getParameterTypes();
+        if (method.getName().startsWith(methodName) && Arrays.equals(actualParameterTypes, parameterTypes)) {
+          return method;
+        }
+      }
+      current = current.getSuperclass();
+    }
+    return null;
+  }
+
+  private static Object asCoroutineStackFrame(Object value) {
+    return value != null && isCoroutineStackFrame(value) ? value : null;
+  }
+
+  private static boolean isCoroutineStackFrame(Object value) {
+    Class<?> current = value.getClass();
+    while (current != null) {
+      Class<?>[] interfaces = current.getInterfaces();
+      for (Class<?> anInterface : interfaces) {
+        if ("kotlin.coroutines.jvm.internal.CoroutineStackFrame".equals(anInterface.getName())) {
+          return true;
+        }
+      }
+      current = current.getSuperclass();
+    }
+    return false;
   }
 
   static List<StackTraceElement> getIndexedStackTraceForTests(Object owner, Object index, int limit) {
@@ -489,6 +791,20 @@ public final class CaptureStorage {
   private static CapturedStack peekCurrentStack(Deque<CurrentStackFrame> stacks) {
     CurrentStackFrame frame = stacks.peekLast();
     return frame == null ? null : frame.myStack;
+  }
+
+  private static CapturedStack getCurrentCapturedStackExcept(CapturedStack ignoredStack) {
+    if (ignoredStack == null) {
+      return getCurrentCapturedStack();
+    }
+    Iterator<CurrentStackFrame> iterator = getStacksForCurrentThread().descendingIterator();
+    while (iterator.hasNext()) {
+      CapturedStack stack = iterator.next().myStack;
+      if (stack != ignoredStack) {
+        return stack;
+      }
+    }
+    return null;
   }
 
   private static void appendCapturedStackTrace(StringBuilder message, CapturedStack stack, String linePrefix) {
@@ -974,9 +1290,39 @@ public final class CaptureStorage {
     return res;
   }
 
+  private static String getNullableKeyText(Object key) {
+    return key == null ? "null" : getKeyText(key);
+  }
+
   private static String getIndexedKeyText(Object owner, Object index) {
     String indexText = index == NULL_INDEX ? "null" : String.valueOf(index);
     return getKeyText(owner) + "[" + indexText + "]";
+  }
+
+  private static class DeferredCapturedStack extends CapturedStack {
+    private volatile CapturedStack myStack;
+
+    private void setStack(CapturedStack stack) {
+      myStack = stack;
+    }
+
+    @Override
+    List<StackTraceElement> getStackTrace() {
+      CapturedStack stack = myStack;
+      return stack == null ? Collections.<StackTraceElement>emptyList() : stack.getStackTrace();
+    }
+
+    @Override
+    int getRecursionDepth() {
+      CapturedStack stack = myStack;
+      return stack == null ? 0 : stack.getRecursionDepth();
+    }
+
+    @Override
+    StackData collectStacks(List<StackTraceElement> stackTrace) {
+      CapturedStack stack = myStack;
+      return stack == null ? new StackData(Collections.<StackTraceElement>emptyList(), null) : stack.collectStacks(stackTrace);
+    }
   }
 
   private static class ThrottledCapturedStack extends CapturedStack {
