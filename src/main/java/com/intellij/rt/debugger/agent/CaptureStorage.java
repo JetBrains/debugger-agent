@@ -188,7 +188,7 @@ public final class CaptureStorage {
 
   @SuppressWarnings("unused")
   public static void captureSharedFlowStacktrace(final Object sharedFlow, final long index) {
-    captureIndexedStack(sharedFlow, Long.valueOf(index));
+    collectIndexedStack(sharedFlow, Long.valueOf(index));
   }
 
   @SuppressWarnings("unused")
@@ -198,12 +198,12 @@ public final class CaptureStorage {
 
   @SuppressWarnings("unused")
   public static void insertEnterSharedFlowStacktrace(final Object sharedFlow, final long index) {
-    insertEnterIndexedStack(sharedFlow, Long.valueOf(index));
+    matchIndexedStack(sharedFlow, Long.valueOf(index));
   }
 
   @SuppressWarnings("unused")
   public static void captureStateFlowStacktrace(final Object stateFlow, final Object state) {
-    captureIndexedStack(stateFlow, state);
+    collectIndexedStack(stateFlow, state);
   }
 
   @SuppressWarnings("unused")
@@ -213,17 +213,17 @@ public final class CaptureStorage {
 
   @SuppressWarnings("unused")
   public static void insertEnterStateFlowStacktrace(final Object stateFlow, final Object state) {
-    insertEnterIndexedStack(stateFlow, state);
+    matchIndexedStack(stateFlow, state);
   }
 
   @SuppressWarnings("unused")
   public static void captureChannelStacktrace(final Object channel, final Object segment, final int index) {
-    captureChannelIndexedStack(channel, segment, Integer.valueOf(index));
+    collectIndexedStack(segment, Integer.valueOf(index));
   }
 
   @SuppressWarnings("unused")
   public static void insertEnterChannelStacktrace(final Object channel, final Object segment, final int index) {
-    insertEnterChannelIndexedStack(channel, segment, Integer.valueOf(index));
+    matchIndexedStack(segment, Integer.valueOf(index));
   }
 
   private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> COROUTINE_GET_CALLER_FRAME_METHODS = new ConcurrentIdentityWeakHashMap<>();
@@ -293,7 +293,7 @@ public final class CaptureStorage {
     String getDescription();
   }
 
-  private static void captureIndexedStack(final Object owner, final Object index) {
+  private static void collectIndexedStack(final Object owner, final Object index) {
     if (!ENABLED || owner == null) {
       return;
     }
@@ -309,24 +309,6 @@ public final class CaptureStorage {
         return getIndexedKeyText(owner, normalizedIndex);
       }
     }, "captureIndexed");
-  }
-
-  private static void captureChannelIndexedStack(final Object channel, final Object segment, final Object index) {
-    if (!ENABLED || segment == null) {
-      return;
-    }
-    final Object normalizedIndex = normalizeIndex(index);
-    captureCurrentStack(new CapturedStackStore() {
-      @Override
-      public void put(CapturedStack stack) {
-        putIndexedStack(segment, normalizedIndex, stack);
-      }
-
-      @Override
-      public String getDescription() {
-        return getIndexedKeyText(segment, normalizedIndex) + " in " + getNullableKeyText(channel);
-      }
-    }, "captureChannelIndexed");
   }
 
   private static void captureCurrentStack(final CapturedStackStore store,
@@ -401,7 +383,7 @@ public final class CaptureStorage {
     });
   }
 
-  private static void insertEnterIndexedStack(final Object owner, final Object index) {
+  private static void matchIndexedStack(final Object owner, final Object index) {
     if (!ENABLED || owner == null) {
       return;
     }
@@ -419,32 +401,6 @@ public final class CaptureStorage {
           logStorageEvent("insertEnterIndexedStack",
                           getCallerDescriptorForLogging() + " -> " + getIndexedKeyText(owner, normalizedIndex) +
                           ", stack saved (" + currentStackCount + ")");
-        }
-        catch (Exception e) {
-          handleException(e);
-        }
-      }
-    });
-  }
-
-  private static void insertEnterChannelIndexedStack(final Object channel, final Object segment, final Object index) {
-    if (!ENABLED || segment == null) {
-      return;
-    }
-    final Object normalizedIndex = normalizeIndex(index);
-    runWithoutThrowableCapture(CURRENT_CONTEXT.get(), new Runnable() {
-      @Override
-      public void run() {
-        try {
-          CapturedStack stack = getIndexedStack(segment, normalizedIndex);
-          logStorageEvent("insertEnterChannelIndexedStack",
-                          "before stack is saved " + getCallerDescriptorForLogging() + " -> " +
-                          getIndexedKeyText(segment, normalizedIndex) + " in " + getNullableKeyText(channel),
-                          stack);
-          int currentStackCount = pushCurrentIndexedStack(stack);
-          logStorageEvent("insertEnterChannelIndexedStack",
-                          getCallerDescriptorForLogging() + " -> " + getIndexedKeyText(segment, normalizedIndex) +
-                          " in " + getNullableKeyText(channel) + ", stack saved (" + currentStackCount + ")");
         }
         catch (Exception e) {
           handleException(e);

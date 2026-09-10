@@ -414,7 +414,7 @@ public final class CaptureAgent {
     KeyProvider keyProvider = createKeyProvider(Arrays.copyOfRange(split, 3, split.length));
     return addCapturePoint(capture, split[0], split[1], split[2], keyProvider, !capture);
   }
-
+// todo hasInsertExit is always false here
   private static InstrumentPoint addCapturePoint(boolean capture,
                                                  String className,
                                                  String methodName,
