@@ -20,11 +20,11 @@ public final class CaptureStorage {
           new ConcurrentIdentityWeakHashMap<>();
   private static final Object NULL_INDEX = new Object();
 
-  private static final ConcurrentIdentityWeakHashMap<Thread, Deque<CurrentStackFrame>> THREAD_TO_STACKS_MAP = new ConcurrentIdentityWeakHashMap<>();
+  private static final ConcurrentIdentityWeakHashMap<Thread, Deque<CapturedStack>> THREAD_TO_STACKS_MAP = new ConcurrentIdentityWeakHashMap<>();
 
-  private static final ThreadLocal<Deque<CurrentStackFrame>> CURRENT_STACKS = new ThreadLocal<Deque<CurrentStackFrame>>() {
+  private static final ThreadLocal<Deque<CapturedStack>> CURRENT_STACKS = new ThreadLocal<Deque<CapturedStack>>() {
     @Override
-    protected Deque<CurrentStackFrame> initialValue() {
+    protected Deque<CapturedStack> initialValue() {
       return new LinkedList<>();
     }
   };
@@ -58,10 +58,10 @@ public final class CaptureStorage {
     }
   };
 
-  private static Deque<CurrentStackFrame> getStacksForCurrentThread() {
+  private static Deque<CapturedStack> getStacksForCurrentThread() {
     if (storeAsyncStackTracesForAllThreads) {
       Thread currentThread = Thread.currentThread();
-      Deque<CurrentStackFrame> capturedStacks = THREAD_TO_STACKS_MAP.get(currentThread);
+      Deque<CapturedStack> capturedStacks = THREAD_TO_STACKS_MAP.get(currentThread);
       if (capturedStacks == null) {
         capturedStacks = new LinkedList<>();
         THREAD_TO_STACKS_MAP.put(currentThread, capturedStacks);
@@ -493,32 +493,27 @@ public final class CaptureStorage {
   }
 
   private static int pushCurrentStack(CapturedStack stack) {
-    return pushCurrentStack(stack, false);
+    return pushCurrentStack(getStacksForCurrentThread(), stack);
   }
 
   private static int pushCurrentIndexedStack(CapturedStack stack) {
-    Deque<CurrentStackFrame> stacks = getStacksForCurrentThread();
+    Deque<CapturedStack> stacks = getStacksForCurrentThread();
     if (stack == null || peekCurrentStack(stacks) == stack) {
       return stacks.size();
     }
-    return pushCurrentStack(stacks, stack, true);
+    return pushCurrentStack(stacks, new IndexedCapturedStack(stack));
   }
 
-  private static int pushCurrentStack(CapturedStack stack, boolean indexedMatch) {
-    Deque<CurrentStackFrame> stacks = getStacksForCurrentThread();
-    return pushCurrentStack(stacks, stack, indexedMatch);
-  }
-
-  private static int pushCurrentStack(Deque<CurrentStackFrame> stacks, CapturedStack stack, boolean indexedMatch) {
-    stacks.add(new CurrentStackFrame(stack, indexedMatch));
+  private static int pushCurrentStack(Deque<CapturedStack> stacks, CapturedStack stack) {
+    stacks.add(stack);
     return stacks.size();
   }
 
   private static int popCurrentStack() {
-    Deque<CurrentStackFrame> stacks = getStacksForCurrentThread();
-    CurrentStackFrame frame;
-    while ((frame = stacks.pollLast()) != null) {
-      if (!frame.myIndexedMatch) {
+    Deque<CapturedStack> stacks = getStacksForCurrentThread();
+    while (!stacks.isEmpty()) {
+      CapturedStack stack = stacks.pollLast();
+      if (!(stack instanceof IndexedCapturedStack)) {
         break;
       }
     }
@@ -579,9 +574,12 @@ public final class CaptureStorage {
     return stack == null ? "null" : stack.getClass().getName() + "@" + Integer.toHexString(System.identityHashCode(stack));
   }
 
-  private static CapturedStack peekCurrentStack(Deque<CurrentStackFrame> stacks) {
-    CurrentStackFrame frame = stacks.peekLast();
-    return frame == null ? null : frame.myStack;
+  private static CapturedStack peekCurrentStack(Deque<CapturedStack> stacks) {
+    return stacks == null || stacks.isEmpty() ? null : unwrapIndexedStack(stacks.peekLast());
+  }
+
+  private static CapturedStack unwrapIndexedStack(CapturedStack stack) {
+    return stack instanceof IndexedCapturedStack ? ((IndexedCapturedStack)stack).myStack : stack;
   }
 
   private static void appendCapturedStackTrace(StringBuilder message, CapturedStack stack, String linePrefix) {
@@ -612,29 +610,19 @@ public final class CaptureStorage {
     }
   }
 
-  private static void appendCurrentStacksDebugString(StringBuilder message, Deque<CurrentStackFrame> stacks) {
+  private static void appendCurrentStacksDebugString(StringBuilder message, Deque<CapturedStack> stacks) {
     message.append("frames=").append(stacks.size());
     if (stacks.isEmpty()) {
       message.append("\n  <empty>");
       return;
     }
     int index = 0;
-    for (CurrentStackFrame frame : stacks) {
+    for (CapturedStack stack : stacks) {
       message.append("\n  frame[").append(index).append("] type=");
-      message.append(frame.myIndexedMatch ? "indexed-match" : "insert");
+      message.append(stack instanceof IndexedCapturedStack ? "indexed-match" : "insert");
       message.append(" ");
-      appendCapturedStackTrace(message, frame.myStack, "    ");
+      appendCapturedStackTrace(message, unwrapIndexedStack(stack), "    ");
       index++;
-    }
-  }
-
-  private static class CurrentStackFrame {
-    private final CapturedStack myStack;
-    private final boolean myIndexedMatch;
-
-    private CurrentStackFrame(CapturedStack stack, boolean indexedMatch) {
-      myStack = stack;
-      myIndexedMatch = indexedMatch;
     }
   }
 
@@ -908,7 +896,7 @@ public final class CaptureStorage {
    */
   @SuppressWarnings("unused")
   public static String getCapturedStackForThread(int limit, Thread thread) {
-    Deque<CurrentStackFrame> capturedStacks = storeAsyncStackTracesForAllThreads
+    Deque<CapturedStack> capturedStacks = storeAsyncStackTracesForAllThreads
             ? THREAD_TO_STACKS_MAP.get(thread)
             : (thread == Thread.currentThread() ? CURRENT_STACKS.get() : null);
     if (capturedStacks == null) return null;
@@ -926,14 +914,14 @@ public final class CaptureStorage {
   public static Map<Thread, String> getAllCapturedStacks(int limit) {
     HashMap<Thread, String> threadToStacks = new HashMap<>();
     if (storeAsyncStackTracesForAllThreads) {
-      for (Map.Entry<ConcurrentIdentityWeakHashMap.Key<Thread>, Deque<CurrentStackFrame>> entry : THREAD_TO_STACKS_MAP.map.entrySet()) {
+      for (Map.Entry<ConcurrentIdentityWeakHashMap.Key<Thread>, Deque<CapturedStack>> entry : THREAD_TO_STACKS_MAP.map.entrySet()) {
         Thread thread = entry.getKey().get();
         if (entry.getValue() == null || entry.getValue().isEmpty() || thread == null || !thread.isAlive()) continue;
         String capturedStack = wrapInString(peekCurrentStack(entry.getValue()), limit);
         threadToStacks.put(thread, capturedStack);
       }
     } else {
-      Deque<CurrentStackFrame> capturedStacks = CURRENT_STACKS.get();
+      Deque<CapturedStack> capturedStacks = CURRENT_STACKS.get();
       if (capturedStacks != null) {
         threadToStacks.put(Thread.currentThread(), wrapInString(peekCurrentStack(capturedStacks), limit));
       }
@@ -1074,6 +1062,29 @@ public final class CaptureStorage {
   private static String getIndexedKeyText(Object owner, Object index) {
     String indexText = index == NULL_INDEX ? "null" : String.valueOf(index);
     return getKeyText(owner) + "[" + indexText + "]";
+  }
+
+  private static class IndexedCapturedStack extends CapturedStack {
+    private final CapturedStack myStack;
+
+    private IndexedCapturedStack(CapturedStack stack) {
+      myStack = stack;
+    }
+
+    @Override
+    List<StackTraceElement> getStackTrace() {
+      return myStack.getStackTrace();
+    }
+
+    @Override
+    int getRecursionDepth() {
+      return myStack.getRecursionDepth();
+    }
+
+    @Override
+    StackData collectStacks(List<StackTraceElement> stackTrace) {
+      return myStack.collectStacks(stackTrace);
+    }
   }
 
   private static class ThrottledCapturedStack extends CapturedStack {
