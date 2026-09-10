@@ -93,7 +93,7 @@ public final class CaptureStorage {
     if (!ENABLED) {
       return;
     }
-    captureCurrentStack(new CapturedStackStore() {
+    captureStack(new CapturedStackStore() {
       @Override
       public void put(CapturedStack stack) {
         STORAGE_GENERAL.put(key, stack);
@@ -186,46 +186,6 @@ public final class CaptureStorage {
     });
   }
 
-  @SuppressWarnings("unused")
-  public static void captureSharedFlowStacktrace(final Object sharedFlow, final long index) {
-    collectIndexedStack(sharedFlow, Long.valueOf(index));
-  }
-
-  @SuppressWarnings("unused")
-  public static void dropSharedFlowStacktrace(final Object sharedFlow, final long index) {
-    dropIndexedStack(sharedFlow, Long.valueOf(index));
-  }
-
-  @SuppressWarnings("unused")
-  public static void insertEnterSharedFlowStacktrace(final Object sharedFlow, final long index) {
-    matchIndexedStack(sharedFlow, Long.valueOf(index));
-  }
-
-  @SuppressWarnings("unused")
-  public static void captureStateFlowStacktrace(final Object stateFlow, final Object state) {
-    collectIndexedStack(stateFlow, state);
-  }
-
-  @SuppressWarnings("unused")
-  public static void dropStateFlowStacktrace(final Object stateFlow, final Object state) {
-    dropIndexedStack(stateFlow, state);
-  }
-
-  @SuppressWarnings("unused")
-  public static void insertEnterStateFlowStacktrace(final Object stateFlow, final Object state) {
-    matchIndexedStack(stateFlow, state);
-  }
-
-  @SuppressWarnings("unused")
-  public static void captureChannelStacktrace(final Object channel, final Object segment, final int index) {
-    collectIndexedStack(segment, Integer.valueOf(index));
-  }
-
-  @SuppressWarnings("unused")
-  public static void insertEnterChannelStacktrace(final Object channel, final Object segment, final int index) {
-    matchIndexedStack(segment, Integer.valueOf(index));
-  }
-
   private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> COROUTINE_GET_CALLER_FRAME_METHODS = new ConcurrentIdentityWeakHashMap<>();
 
   @SuppressWarnings("unused")
@@ -281,24 +241,13 @@ public final class CaptureStorage {
     });
   }
 
-  //// END - METHODS CALLED FROM THE USER PROCESS
-
-  private interface Callable<T> {
-    T call();
-  }
-
-  private interface CapturedStackStore {
-    void put(CapturedStack stack);
-
-    String getDescription();
-  }
-
-  private static void collectIndexedStack(final Object owner, final Object index) {
+  @SuppressWarnings("unused")
+  public static void collectIndexedStack(final Object owner, final Object index) {
     if (!ENABLED || owner == null) {
       return;
     }
     final Object normalizedIndex = normalizeIndex(index);
-    captureCurrentStack(new CapturedStackStore() {
+    captureStack(new CapturedStackStore() {
       @Override
       public void put(CapturedStack stack) {
         putIndexedStack(owner, normalizedIndex, stack);
@@ -308,12 +257,7 @@ public final class CaptureStorage {
       public String getDescription() {
         return getIndexedKeyText(owner, normalizedIndex);
       }
-    }, "captureIndexed");
-  }
-
-  private static void captureCurrentStack(final CapturedStackStore store,
-                                          final String debugPrefix) {
-    captureStack(store, debugPrefix);
+    }, "collectIndexedStack");
   }
 
   private static void captureStack(final CapturedStackStore store,
@@ -363,7 +307,8 @@ public final class CaptureStorage {
     });
   }
 
-  private static void dropIndexedStack(final Object owner, final Object index) {
+  @SuppressWarnings("unused")
+  public static void dropIndexedStack(final Object owner, final Object index) {
     if (!ENABLED || owner == null) {
       return;
     }
@@ -383,7 +328,8 @@ public final class CaptureStorage {
     });
   }
 
-  private static void matchIndexedStack(final Object owner, final Object index) {
+  @SuppressWarnings("unused")
+  public static void matchIndexedStack(final Object owner, final Object index) {
     if (!ENABLED || owner == null) {
       return;
     }
@@ -393,12 +339,12 @@ public final class CaptureStorage {
       public void run() {
         try {
           CapturedStack stack = getIndexedStack(owner, normalizedIndex);
-          logStorageEvent("insertEnterIndexedStack",
+          logStorageEvent("matchIndexedStack",
                           "before stack is saved " + getCallerDescriptorForLogging() + " -> " +
                           getIndexedKeyText(owner, normalizedIndex),
                           stack);
           int currentStackCount = pushCurrentIndexedStack(stack);
-          logStorageEvent("insertEnterIndexedStack",
+          logStorageEvent("matchIndexedStack",
                           getCallerDescriptorForLogging() + " -> " + getIndexedKeyText(owner, normalizedIndex) +
                           ", stack saved (" + currentStackCount + ")");
         }
@@ -407,6 +353,18 @@ public final class CaptureStorage {
         }
       }
     });
+  }
+
+  //// END - METHODS CALLED FROM THE USER PROCESS
+
+  private interface Callable<T> {
+    T call();
+  }
+
+  private interface CapturedStackStore {
+    void put(CapturedStack stack);
+
+    String getDescription();
   }
 
   private static Object normalizeIndex(Object index) {

@@ -565,6 +565,7 @@ public final class CaptureAgent {
         }
         Type type = argumentTypes[index];
         mv.visitVarInsn(type.getOpcode(Opcodes.ILOAD), getLocalVariableIndex(isStatic, argumentTypes, index));
+        boxIfNeeded(mv, type);
       }
     }
 
@@ -588,6 +589,39 @@ public final class CaptureAgent {
 
   private static KeyProvider storageMethod(String storageMethodName, int... indexes) {
     return new MethodArgumentsKeyProvider(storageMethodName, indexes);
+  }
+
+  private static void boxIfNeeded(MethodVisitor mv, Type type) {
+    String owner;
+    switch (type.getSort()) {
+      case Type.BOOLEAN:
+        owner = "java/lang/Boolean";
+        break;
+      case Type.BYTE:
+        owner = "java/lang/Byte";
+        break;
+      case Type.CHAR:
+        owner = "java/lang/Character";
+        break;
+      case Type.SHORT:
+        owner = "java/lang/Short";
+        break;
+      case Type.INT:
+        owner = "java/lang/Integer";
+        break;
+      case Type.FLOAT:
+        owner = "java/lang/Float";
+        break;
+      case Type.LONG:
+        owner = "java/lang/Long";
+        break;
+      case Type.DOUBLE:
+        owner = "java/lang/Double";
+        break;
+      default:
+        return;
+    }
+    mv.visitMethodInsn(Opcodes.INVOKESTATIC, owner, "valueOf", "(" + type.getDescriptor() + ")L" + owner + ";", false);
   }
 
   private static int getLocalVariableIndex(boolean isStatic, Type[] argumentTypes, int argumentIndex) {
@@ -678,27 +712,27 @@ public final class CaptureAgent {
         String debuggerWrappers = "kotlinx/coroutines/internal/DebuggerWrappersKt";
         String sharedFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/SharedFlow;J)Ljava/lang/Object;";
         addCapturePoint(true, debuggerWrappers, "collectStacktrace", sharedFlowStacktraceDesc,
-                        storageMethod("captureSharedFlowStacktrace", 0, 1), false);
+                        storageMethod("collectIndexedStack", 0, 1), false);
         addCapturePoint(true, debuggerWrappers, "dropStacktrace", sharedFlowStacktraceDesc,
-                        storageMethod("dropSharedFlowStacktrace", 0, 1), false);
+                        storageMethod("dropIndexedStack", 0, 1), false);
         addCapturePoint(false, debuggerWrappers, "matchStacktrace", sharedFlowStacktraceDesc,
-                        storageMethod("insertEnterSharedFlowStacktrace", 0, 1), false);
+                        storageMethod("matchIndexedStack", 0, 1), false);
 
         String channelStacktraceDesc =
                 "(Lkotlinx/coroutines/channels/Channel;Lkotlinx/coroutines/channels/ChannelSegment;I)Ljava/lang/Object;";
         addCapturePoint(true, debuggerWrappers, "collectStacktrace", channelStacktraceDesc,
-                        storageMethod("captureChannelStacktrace", 0, 1, 2), false);
+                        storageMethod("collectIndexedStack", 1, 2), false);
         addCapturePoint(false, debuggerWrappers, "matchStacktrace", channelStacktraceDesc,
-                        storageMethod("insertEnterChannelStacktrace", 0, 1, 2), false);
+                        storageMethod("matchIndexedStack", 1, 2), false);
 
         if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.mutable.state.flows.stack.trace")) {
           String stateFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/StateFlow;Ljava/lang/Object;)Ljava/lang/Object;";
           addCapturePoint(true, debuggerWrappers, "collectStacktrace", stateFlowStacktraceDesc,
-                          storageMethod("captureStateFlowStacktrace", 0, 1), false);
+                          storageMethod("collectIndexedStack", 0, 1), false);
           addCapturePoint(true, debuggerWrappers, "dropStacktrace", stateFlowStacktraceDesc,
-                          storageMethod("dropStateFlowStacktrace", 0, 1), false);
+                          storageMethod("dropIndexedStack", 0, 1), false);
           addCapturePoint(false, debuggerWrappers, "matchStacktrace", stateFlowStacktraceDesc,
-                          storageMethod("insertEnterStateFlowStacktrace", 0, 1), false);
+                          storageMethod("matchIndexedStack", 0, 1), false);
         }
       }
     }
