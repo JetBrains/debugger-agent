@@ -372,12 +372,13 @@ public final class CaptureStorage {
   }
 
   private static ConcurrentMap<Object, CapturedStack> getOrCreateIndexedStacks(Object owner) {
-    ConcurrentMap<Object, CapturedStack> stacks = STORAGE_INDEXED.get(owner);
-    if (stacks != null) return stacks;
-
-    stacks = new ConcurrentHashMap<>();
-    ConcurrentMap<Object, CapturedStack> existing = STORAGE_INDEXED.putIfAbsent(owner, stacks);
-    return existing == null ? stacks : existing;
+    ConcurrentMap<Object, CapturedStack> result = STORAGE_INDEXED.get(owner);
+    if (result != null) {
+      return result;
+    }
+    ConcurrentMap<Object, CapturedStack> created = new ConcurrentHashMap<>();
+    ConcurrentMap<Object, CapturedStack> existing = STORAGE_INDEXED.putIfAbsent(owner, created);
+    return existing == null ? created : existing;
   }
 
   private static void putIndexedStack(Object owner, Object index, CapturedStack stack) {
@@ -396,16 +397,28 @@ public final class CaptureStorage {
     }
   }
 
+  static List<StackTraceElement> getIndexedStackTraceForTests(Object owner, Object index, int limit) {
+    CapturedStack stack = getIndexedStack(owner, normalizeIndex(index));
+    return stack == null ? null : getStackTrace(stack, limit);
+  }
+
+  static CapturedStack getIndexedCapturedStackForTests(Object owner, Object index) {
+    return getIndexedStack(owner, normalizeIndex(index));
+  }
+
+  private static int pushCurrentStack(CapturedStack stack) {
+    return pushCurrentStack(getStacksForCurrentThread(), stack);
+  }
+
   private static int pushCurrentIndexedStack(CapturedStack stack) {
     Deque<CapturedStack> stacks = getStacksForCurrentThread();
     if (stack == null || peekCurrentStack(stacks) == stack) {
       return stacks.size();
     }
-    return pushCurrentStack(new MatchedCapturedStack(stack));
+    return pushCurrentStack(stacks, new IndexedCapturedStack(stack));
   }
 
-  private static int pushCurrentStack(CapturedStack stack) {
-    Deque<CapturedStack> stacks = getStacksForCurrentThread();
+  private static int pushCurrentStack(Deque<CapturedStack> stacks, CapturedStack stack) {
     stacks.add(stack);
     return stacks.size();
   }
@@ -414,11 +427,19 @@ public final class CaptureStorage {
     Deque<CapturedStack> stacks = getStacksForCurrentThread();
     while (!stacks.isEmpty()) {
       CapturedStack stack = stacks.pollLast();
-      if (!(stack instanceof MatchedCapturedStack)) {
+      if (!(stack instanceof IndexedCapturedStack)) {
         break;
       }
     }
     return stacks.size();
+  }
+
+  static void clearCurrentStacksForTests() {
+    getStacksForCurrentThread().clear();
+  }
+
+  static int getCurrentStackFrameCountForTests() {
+    return getStacksForCurrentThread().size();
   }
 
   private static void logStorageEvent(String event, String details) {
@@ -468,11 +489,11 @@ public final class CaptureStorage {
   }
 
   private static CapturedStack peekCurrentStack(Deque<CapturedStack> stacks) {
-    return stacks == null || stacks.isEmpty() ? null : unwrapMatchedStack(stacks.peekLast());
+    return stacks == null || stacks.isEmpty() ? null : unwrapIndexedStack(stacks.peekLast());
   }
 
-  private static CapturedStack unwrapMatchedStack(CapturedStack stack) {
-    return stack instanceof MatchedCapturedStack ? ((MatchedCapturedStack)stack).myCapturedStack : stack;
+  private static CapturedStack unwrapIndexedStack(CapturedStack stack) {
+    return stack instanceof IndexedCapturedStack ? ((IndexedCapturedStack)stack).myStack : stack;
   }
 
   private static void appendCapturedStackTrace(StringBuilder message, CapturedStack stack, String linePrefix) {
@@ -512,9 +533,9 @@ public final class CaptureStorage {
     int index = 0;
     for (CapturedStack stack : stacks) {
       message.append("\n  frame[").append(index).append("] type=");
-      message.append(stack instanceof MatchedCapturedStack ? "indexed-match" : "insert");
+      message.append(stack instanceof IndexedCapturedStack ? "indexed-match" : "insert");
       message.append(" ");
-      appendCapturedStackTrace(message, unwrapMatchedStack(stack), "    ");
+      appendCapturedStackTrace(message, unwrapIndexedStack(stack), "    ");
       index++;
     }
   }
@@ -948,31 +969,35 @@ public final class CaptureStorage {
     return res;
   }
 
+  private static String getNullableKeyText(Object key) {
+    return key == null ? "null" : getKeyText(key);
+  }
+
   private static String getIndexedKeyText(Object owner, Object index) {
     String indexText = index == NULL_INDEX ? "null" : String.valueOf(index);
     return getKeyText(owner) + "[" + indexText + "]";
   }
 
-  private static class MatchedCapturedStack extends CapturedStack {
-    private final CapturedStack myCapturedStack;
+  private static class IndexedCapturedStack extends CapturedStack {
+    private final CapturedStack myStack;
 
-    private MatchedCapturedStack(CapturedStack capturedStack) {
-      myCapturedStack = capturedStack;
+    private IndexedCapturedStack(CapturedStack stack) {
+      myStack = stack;
     }
 
     @Override
     List<StackTraceElement> getStackTrace() {
-      return myCapturedStack.getStackTrace();
+      return myStack.getStackTrace();
     }
 
     @Override
     int getRecursionDepth() {
-      return myCapturedStack.getRecursionDepth();
+      return myStack.getRecursionDepth();
     }
 
     @Override
     StackData collectStacks(List<StackTraceElement> stackTrace) {
-      return myCapturedStack.collectStacks(stackTrace);
+      return myStack.collectStacks(stackTrace);
     }
   }
 
@@ -981,6 +1006,7 @@ public final class CaptureStorage {
     public static final ThrottledCapturedStack INSTANCE = new ThrottledCapturedStack();
 
     private static final List<StackTraceElement> STACK_TRACE_ELEMENTS = Collections.singletonList(THROTTLED_STACK_ELEMENT);
+
 
     private ThrottledCapturedStack() {
     }
