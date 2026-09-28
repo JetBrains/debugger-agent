@@ -187,6 +187,7 @@ public final class CaptureStorage {
   }
 
   private static final ConcurrentIdentityWeakHashMap<ClassLoader, Method> COROUTINE_GET_CALLER_FRAME_METHODS = new ConcurrentIdentityWeakHashMap<>();
+  private static final int COROUTINE_FRAME_CHAIN_LIMIT = Integer.getInteger("debugger.agent.coroutines.frame.chain.limit", 1024);
 
   @SuppressWarnings("unused")
   public static Object coroutineOwner(final Object key) {
@@ -260,8 +261,49 @@ public final class CaptureStorage {
     }, "collectIndexedStack");
   }
 
+  @SuppressWarnings("unused")
+  public static void collectIndexedStackFromContinuation(final Object owner, final Object index, final Object continuation) {
+    if (!ENABLED || owner == null) {
+      return;
+    }
+    final Object normalizedIndex = normalizeIndex(index);
+    captureStackFromContinuation(new CapturedStackStore() {
+      @Override
+      public void put(CapturedStack stack) {
+        putIndexedStack(owner, normalizedIndex, stack);
+      }
+
+      @Override
+      public String getDescription() {
+        return getIndexedKeyText(owner, normalizedIndex);
+      }
+    }, "collectIndexedStackFromContinuation", continuation);
+  }
+
   private static void captureStack(final CapturedStackStore store,
                                    final String debugPrefix) {
+    captureStack(store, debugPrefix, new CapturedStackFactory() {
+      @Override
+      public CapturedStack create(CapturedStack previous) {
+        return createCapturedStack(new Throwable(), previous);
+      }
+    });
+  }
+
+  private static void captureStackFromContinuation(final CapturedStackStore store,
+                                                   final String debugPrefix,
+                                                   final Object continuation) {
+    captureStack(store, debugPrefix, new CapturedStackFactory() {
+      @Override
+      public CapturedStack create(CapturedStack previous) {
+        return createCapturedStackFromContinuation(continuation, previous);
+      }
+    });
+  }
+
+  private static void captureStack(final CapturedStackStore store,
+                                   final String debugPrefix,
+                                   final CapturedStackFactory stackFactory) {
     ThreadLocalContext context = CURRENT_CONTEXT.get();
     boolean executed = runWithOverheadTrackingAndWithoutThrowableCapture(context, new Runnable() {
       @Override
@@ -274,7 +316,7 @@ public final class CaptureStorage {
                             ", previous current stack: " + getStackIdentity(previous),
                     previous);
           }
-          CapturedStack capturedStack = createCapturedStack(new Throwable(), previous);
+          CapturedStack capturedStack = stackFactory.create(previous);
           store.put(capturedStack);
           if (debugPrefix.contains("Indexed")) {
             logStorageEvent(debugPrefix,
@@ -365,6 +407,10 @@ public final class CaptureStorage {
     void put(CapturedStack stack);
 
     String getDescription();
+  }
+
+  private interface CapturedStackFactory {
+    CapturedStack create(CapturedStack previous);
   }
 
   private static Object normalizeIndex(Object index) {
@@ -677,9 +723,47 @@ public final class CaptureStorage {
     return appendCapturedStack(new ExceptionCapturedStack(exception), insertMatch);
   }
 
+  private static CapturedStack createCapturedStackFromContinuation(Object continuation, CapturedStack insertMatch) {
+    CapturedStack stack = createCoroutineCapturedStack(continuation);
+    if (stack == null) {
+      return createCapturedStack(new Throwable(), insertMatch);
+    }
+    return appendCapturedStack(stack, insertMatch, false);
+  }
+
+  private static CapturedStack createCoroutineCapturedStack(Object continuation) {
+    if (continuation == null) {
+      return null;
+    }
+    try {
+      Method getCallerFrameMethod = getGetCallerFrameMethod(continuation);
+      Method getStackTraceElementMethod = getCallerFrameMethod.getDeclaringClass().getDeclaredMethod("getStackTraceElement");
+      ArrayList<StackTraceElement> stackTrace = new ArrayList<>();
+      Set<Object> visitedFrames = Collections.newSetFromMap(new IdentityHashMap<Object, Boolean>());
+      Object frame = continuation;
+      int frameCount = 0;
+      while (frame != null && frameCount < COROUTINE_FRAME_CHAIN_LIMIT && visitedFrames.add(frame)) {
+        Object stackTraceElement = getStackTraceElementMethod.invoke(frame);
+        if (stackTraceElement instanceof StackTraceElement) {
+          stackTrace.add((StackTraceElement)stackTraceElement);
+        }
+        frame = getCallerFrameMethod.invoke(frame);
+        frameCount++;
+      }
+      return stackTrace.isEmpty() ? null : new UnwindCapturedStack(stackTrace);
+    }
+    catch (Exception ignored) {
+      return null;
+    }
+  }
+
   private static CapturedStack appendCapturedStack(CapturedStack current, CapturedStack insertMatch) {
+    return appendCapturedStack(current, insertMatch, true);
+  }
+
+  private static CapturedStack appendCapturedStack(CapturedStack current, CapturedStack insertMatch, boolean trimAtInsertFrame) {
     if (insertMatch != null) {
-      CapturedStack stack = new DeepCapturedStack(current, insertMatch);
+      CapturedStack stack = new DeepCapturedStack(current, insertMatch, trimAtInsertFrame);
       if (stack.getRecursionDepth() > 100) {
         ArrayList<StackTraceElement> trace = getStackTrace(stack, 500);
         trace.trimToSize();
@@ -751,11 +835,13 @@ public final class CaptureStorage {
     private final CapturedStack myCurrent;
     private final CapturedStack myPrevious;
     private final int myRecursionDepth;
+    private final boolean myTrimAtInsertFrame;
 
-    DeepCapturedStack(CapturedStack stack, CapturedStack previous) {
+    DeepCapturedStack(CapturedStack stack, CapturedStack previous, boolean trimAtInsertFrame) {
       myCurrent = stack;
       myPrevious = previous;
       myRecursionDepth = previous.getRecursionDepth() + 1;
+      myTrimAtInsertFrame = trimAtInsertFrame;
     }
 
     @Override
@@ -770,6 +856,9 @@ public final class CaptureStorage {
 
     @Override
     StackData collectStacks(List<StackTraceElement> stackTrace) {
+      if (!myTrimAtInsertFrame) {
+        return new StackData(stackTrace, myPrevious);
+      }
       int size = stackTrace.size();
       int newEnd = Integer.MAX_VALUE;
       for (int i = 0; i < size; i++) {

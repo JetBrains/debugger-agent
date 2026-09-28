@@ -710,8 +710,12 @@ public final class CaptureAgent {
 
         String debuggerWrappers = "kotlinx/coroutines/internal/DebuggerWrappersKt";
         String sharedFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/SharedFlow;J)Ljava/lang/Object;";
+        String sharedFlowStacktraceWithContinuationDesc =
+                "(Lkotlinx/coroutines/flow/SharedFlow;JLkotlin/coroutines/Continuation;)Ljava/lang/Object;";
         addCapturePoint(true, debuggerWrappers, "collectStacktrace", sharedFlowStacktraceDesc,
                         storageMethod("collectIndexedStack", 0, 1), false);
+        addCapturePoint(true, debuggerWrappers, "collectStacktrace", sharedFlowStacktraceWithContinuationDesc,
+                        storageMethod("collectIndexedStackFromContinuation", 0, 1, 2), false);
         addCapturePoint(true, debuggerWrappers, "dropStacktrace", sharedFlowStacktraceDesc,
                         storageMethod("dropIndexedStack", 0, 1), false);
         addCapturePoint(false, debuggerWrappers, "matchStacktrace", sharedFlowStacktraceDesc,
@@ -719,15 +723,23 @@ public final class CaptureAgent {
 
         String channelStacktraceDesc =
                 "(Lkotlinx/coroutines/channels/Channel;Lkotlinx/coroutines/channels/ChannelSegment;I)Ljava/lang/Object;";
+        String channelStacktraceWithContinuationDesc =
+                "(Lkotlinx/coroutines/channels/Channel;Lkotlinx/coroutines/channels/ChannelSegment;ILkotlin/coroutines/Continuation;)Ljava/lang/Object;";
         addCapturePoint(true, debuggerWrappers, "collectStacktrace", channelStacktraceDesc,
                         storageMethod("collectIndexedStack", 1, 2), false);
+        addCapturePoint(true, debuggerWrappers, "collectStacktrace", channelStacktraceWithContinuationDesc,
+                        storageMethod("collectIndexedStackFromContinuation", 1, 2, 3), false);
         addCapturePoint(false, debuggerWrappers, "matchStacktrace", channelStacktraceDesc,
                         storageMethod("matchIndexedStack", 1, 2), false);
 
         if (Boolean.getBoolean("kotlinx.coroutines.debug.enable.mutable.state.flows.stack.trace")) {
           String stateFlowStacktraceDesc = "(Lkotlinx/coroutines/flow/StateFlow;Ljava/lang/Object;)Ljava/lang/Object;";
+          String stateFlowStacktraceWithContinuationDesc =
+                  "(Lkotlinx/coroutines/flow/StateFlow;Ljava/lang/Object;Lkotlin/coroutines/Continuation;)Ljava/lang/Object;";
           addCapturePoint(true, debuggerWrappers, "collectStacktrace", stateFlowStacktraceDesc,
                           storageMethod("collectIndexedStack", 0, 1), false);
+          addCapturePoint(true, debuggerWrappers, "collectStacktrace", stateFlowStacktraceWithContinuationDesc,
+                          storageMethod("collectIndexedStackFromContinuation", 0, 1, 2), false);
           addCapturePoint(true, debuggerWrappers, "dropStacktrace", stateFlowStacktraceDesc,
                           storageMethod("dropIndexedStack", 0, 1), false);
           addCapturePoint(false, debuggerWrappers, "matchStacktrace", stateFlowStacktraceDesc,
