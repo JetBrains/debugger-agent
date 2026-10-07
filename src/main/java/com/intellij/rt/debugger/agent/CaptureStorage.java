@@ -77,7 +77,7 @@ public final class CaptureStorage {
   }
 
   @SuppressWarnings("StaticNonFinalField")
-  public static boolean DEBUG = true; // set from debugger
+  public static boolean DEBUG = false; // set from debugger
   private static boolean ENABLED = true; // set from debugger
 
   static final StackTraceElement ASYNC_STACK_ELEMENT =
@@ -746,6 +746,11 @@ public final class CaptureStorage {
         Object stackTraceElement = getStackTraceElementMethod.invoke(frame);
         if (stackTraceElement instanceof StackTraceElement) {
           stackTrace.add((StackTraceElement)stackTraceElement);
+          // Heuristic: do not collect the whole continuation stack,
+          // just find the first meaningful stack frame not in the kx library
+          if (!stackTraceElement.toString().startsWith("kotlinx.coroutines")) {
+            break;
+          }
         }
         frame = getCallerFrameMethod.invoke(frame);
         frameCount++;
